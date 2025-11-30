@@ -36,7 +36,8 @@ class SweTask:
     Assumptions:
       - repo_path points to a local working copy of the repository.
       - tests_path is a path inside that repo that pytest can target
-        (e.g., "tests", "tests/test_bug.py").
+        (e.g., "tests", "tests/test_bug.py"). This may be None for some
+        SWE-bench instances; downstream code must tolerate that.
       - test_command (optional) overrides the default `pytest -q tests_path`.
       - security_rules uses the same tags as τGuardian-10:
           ["SQLI", "MISSING_AUTH", "NO_TRANSACTION", "SECRETS", "XSS", "WEAK_RNG", ...]
@@ -47,7 +48,7 @@ class SweTask:
     name: str
     repo_path: str
     description: str
-    tests_path: str = "tests"
+    tests_path: Optional[str] = "tests"
     test_command: Optional[List[str]] = None
     security_rules: Optional[List[str]] = None
     python_files: Optional[List[str]] = None  # relative paths inside repo
@@ -224,17 +225,18 @@ def snapshot_relevant_code(task: SweTask) -> str:
                     snapshot_parts.append(f"=== {file} ===\n{content}\n")
 
     # 3) Always include test file(s) if available
-    test_path = repo_path / task.tests_path
-    if test_path.exists():
-        if test_path.is_file():
-            content = test_path.read_text(encoding="utf-8")
-            snapshot_parts.append(f"=== {task.tests_path} (tests) ===\n{content}\n")
-        elif test_path.is_dir():
-            test_files = sorted(test_path.rglob("test_*.py"))[:3]
-            for tf in test_files:
-                rel = str(tf.relative_to(repo_path))
-                content = tf.read_text(encoding="utf-8")
-                snapshot_parts.append(f"=== {rel} (tests) ===\n{content}\n")
+    if task.tests_path:
+        test_path = repo_path / task.tests_path
+        if test_path.exists():
+            if test_path.is_file():
+                content = test_path.read_text(encoding="utf-8")
+                snapshot_parts.append(f"=== {task.tests_path} (tests) ===\n{content}\n")
+            elif test_path.is_dir():
+                test_files = sorted(test_path.rglob("test_*.py"))[:3]
+                for tf in test_files:
+                    rel = str(tf.relative_to(repo_path))
+                    content = tf.read_text(encoding="utf-8")
+                    snapshot_parts.append(f"=== {rel} (tests) ===\n{content}\n")
 
     # 4) Ultimate fallback: directory structure
     if not snapshot_parts:
@@ -253,10 +255,21 @@ def run_swe_tests(task: SweTask, cfg: SweConfig) -> harness.CheckResults:
     """Run the repository's tests for this SWE task."""
 
     repo = os.path.abspath(task.repo_path)
-    tests_path = os.path.join(repo, task.tests_path)
+    repo_path = Path(repo)
+    default_target = task.tests_path or "tests"
 
     if cfg.use_sandbox:
-        # Docker sandbox
+        if not task.tests_path:
+            output = "[SWE] Sandbox mode requires tests_path; none provided."
+            return harness.CheckResults(
+                total_tests=0,
+                tests_failed=1,
+                tests_output=output,
+                security_violations=[],
+                linter_errors=[],
+            )
+
+        tests_path = os.fspath(repo_path / task.tests_path)
         exit_code, output = run_tests_in_sandbox(
             test_file_path=tests_path,
             project_root=repo,
@@ -264,7 +277,7 @@ def run_swe_tests(task: SweTask, cfg: SweConfig) -> harness.CheckResults:
         )
         total, failed = parse_pytest_sandbox_output(output)
     else:
-        cmd = task.test_command or ["pytest", "-q", task.tests_path]
+        cmd = task.test_command or ["pytest", "-q", default_target]
         exit_code, output = harness.run_shell_command(cmd, cwd=repo)
         total, failed = harness.parse_pytest_output(output)
 
@@ -488,6 +501,35 @@ def extract_files_from_patch(patch: str) -> List[str]:
     return sorted(set(files))
 
 
+def _infer_tests_path(test_path_value: Optional[str], test_cmd_list: Optional[List[str]]) -> Tuple[Optional[str], Optional[List[str]]]:
+    """Infer tests_path and normalized test_command tokens from SWE metadata."""
+
+    tests_path = test_path_value or None
+    normalized_cmd: Optional[List[str]] = None
+
+    if test_cmd_list:
+        if isinstance(test_cmd_list, str):
+            normalized_cmd = test_cmd_list.split()
+        else:
+            normalized_cmd = list(test_cmd_list)
+    
+    if not tests_path and normalized_cmd:
+        candidates: List[str] = []
+        for tok in normalized_cmd[1:]:
+            token = tok.strip()
+            if not token:
+                continue
+            if "/" in token or "\\" in token or token.endswith(".py") or "tests" in token.lower():
+                candidates.append(token)
+        if candidates:
+            tests_path = candidates[-1]
+
+    if not tests_path:
+        tests_path = "tests"
+
+    return tests_path, normalized_cmd
+
+
 def load_swebench_tasks(
     subset: str = "lite",
     limit: int = 10,
@@ -539,27 +581,30 @@ def load_swebench_tasks(
 
         if not repo_path.exists():
             print(f"  [{i + 1}/{limit}] Cloning {repo_name}...")
-            subprocess.run(
+            clone = subprocess.run(
                 ["git", "clone", f"https://github.com/{repo_name}.git", str(repo_path)],
                 cwd=repo_workspace,
                 capture_output=True,
                 text=True,
             )
-            subprocess.run(
+            if clone.returncode != 0:
+                print(f"  ⚠ Failed to clone {repo_name}: {clone.stderr.strip() or clone.stdout.strip()}")
+                continue
+
+            checkout = subprocess.run(
                 ["git", "checkout", base_commit],
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
             )
+            if checkout.returncode != 0:
+                print(f"  ⚠ Failed to checkout {base_commit} in {repo_name}: {checkout.stderr.strip() or checkout.stdout.strip()}")
+                continue
 
         changed_files = extract_files_from_patch(patch)
         test_cmd = instance.get("test_cmd", None)
-        if test_cmd:
-            test_cmd_list = test_cmd.split()
-        else:
-            test_cmd_list = None
-
-        tests_path = instance.get("test_path", "tests")
+        tests_path_raw = instance.get("test_path") or None
+        tests_path, test_cmd_list = _infer_tests_path(tests_path_raw, test_cmd)
 
         task = SweTask(
             name=instance_id,
@@ -593,12 +638,21 @@ def swe_experiment(
 
     for task in tasks:
         print(f"[SWE] Baseline for {task.name} on {cfg.model_name}...")
-        baseline = run_swe_baseline(cfg, task)
-        records.append(harness.summarize_baseline(baseline))
+        try:
+            baseline = run_swe_baseline(cfg, task)
+            records.append(harness.summarize_baseline(baseline))
+        except Exception as e:
+            print(f"  ⚠ Baseline failed for {task.name}: {e}")
+            records.append({"model": cfg.model_name, "task": task.name, "type": "error", "phase": "baseline", "error": str(e)})
+            continue
 
         print(f"[SWE] Wrapped (tau_max={cfg.tau_max}) for {task.name} on {cfg.model_name}...")
-        wrapped = run_swe_wrapped(cfg, task)
-        records.append(harness.summarize_wrapped(wrapped))
+        try:
+            wrapped = run_swe_wrapped(cfg, task)
+            records.append(harness.summarize_wrapped(wrapped))
+        except Exception as e:
+            print(f"  ⚠ Wrapped run failed for {task.name}: {e}")
+            records.append({"model": cfg.model_name, "task": task.name, "type": "error", "phase": "wrapped", "error": str(e)})
 
     harness.write_results_jsonl(results_path, records)
     print(f"[SWE] Wrote SWE results to {results_path}")
