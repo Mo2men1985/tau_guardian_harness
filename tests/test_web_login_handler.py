@@ -56,3 +56,4 @@ def test_inactive_user():
     result = login_handler(repo, "bob", "password456")
     assert result["ok"] is False
     assert result["error"] == "inactive_user"
+

@@ -1,28 +1,33 @@
+"""Reference file upload validator."""
+
+from __future__ import annotations
+
 import os
+from typing import Dict
 
-
+# Allow modest uploads (5 MB).
 MAX_SIZE_BYTES = 5 * 1024 * 1024
 
-_EXTENSION_TO_CONTENT_TYPE = {
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".pdf": "application/pdf",
+_ALLOWED_TYPES: Dict[str, str] = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "gif": "image/gif",
+    "pdf": "application/pdf",
 }
 
 
 def validate_upload(filename: str, content_type: str, size_bytes: int) -> bool:
-    """Validate a file upload using simple metadata checks."""
     if size_bytes <= 0 or size_bytes > MAX_SIZE_BYTES:
         return False
 
     _, ext = os.path.splitext(filename)
-    ext = ext.lower()
-    if ext not in _EXTENSION_TO_CONTENT_TYPE:
+    ext = ext.lstrip(".").lower()
+    expected_type = _ALLOWED_TYPES.get(ext)
+    if not expected_type:
         return False
 
-    expected_ct = _EXTENSION_TO_CONTENT_TYPE[ext]
-    if content_type.lower() != expected_ct.lower():
+    if expected_type != content_type.lower():
         return False
 
     return True

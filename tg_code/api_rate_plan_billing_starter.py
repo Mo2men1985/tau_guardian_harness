@@ -3,3 +3,4 @@ def calculate_monthly_bill(calls: int, plan: str) -> float:
     if calls < 0:
         raise ValueError("calls must be non-negative")
     return float(calls) * 0.01
+

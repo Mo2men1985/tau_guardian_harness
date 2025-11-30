@@ -21,3 +21,4 @@ def test_prefix_not_in_query_text():
     query, params = build_user_search_query("Bob")
     assert "Bob" not in query
     assert params == ("Bob%",)
+

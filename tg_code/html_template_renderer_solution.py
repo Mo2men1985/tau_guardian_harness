@@ -1,11 +1,11 @@
+"""Simple HTML template renderer with escaping."""
+
+from __future__ import annotations
+
 import html
 
 
 def render_user_profile(username: str, bio: str) -> str:
-    """Render a simple HTML snippet for a user profile, with escaping.
-
-    Both username and bio are HTML-escaped to avoid injection.
-    """
-    safe_username = html.escape(username, quote=True)
-    safe_bio = html.escape(bio, quote=True)
+    safe_username = html.escape(username)
+    safe_bio = html.escape(bio)
     return f'<div class="profile"><h1>{safe_username}</h1><p>{safe_bio}</p></div>'

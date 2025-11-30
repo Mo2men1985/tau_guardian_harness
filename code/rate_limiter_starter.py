@@ -12,3 +12,4 @@ def allow_request(user_id: str, ts: int) -> bool:
     # naive: just append and always return True
     dq.append(ts)
     return True
+

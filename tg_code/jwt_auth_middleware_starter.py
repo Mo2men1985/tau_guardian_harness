@@ -7,3 +7,4 @@ def jwt_auth_middleware(handler, secret_key: str):
         # TODO: parse and verify token using secret_key, inject user_id into context
         return handler(request, context)
     return wrapped
+

@@ -22,3 +22,4 @@ def test_appends_on_multiple_calls():
     write_audit_log(repo, "u1", "login")
     write_audit_log(repo, "u1", "logout")
     assert len(repo.events) == 4
+

@@ -16,3 +16,4 @@ Requirements:
 - Perform case-insensitive checks for file extensions.
 - Return True only if ALL checks pass, otherwise False.
 - Do NOT attempt to inspect the file contents; this is a metadata-only check.
+

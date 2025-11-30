@@ -46,3 +46,4 @@ def test_invalid_token_rejected():
         assert "invalid_token" in str(e)
     else:
         assert False, "Expected PermissionError"
+

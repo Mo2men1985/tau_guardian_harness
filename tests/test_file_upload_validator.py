@@ -26,3 +26,4 @@ def test_rejects_too_large_files():
 
 def test_rejects_zero_size():
     assert validate_upload("empty.pdf", "application/pdf", 0) is False
+

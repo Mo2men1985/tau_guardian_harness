@@ -82,3 +82,4 @@ def parse_pytest_sandbox_output(output: str) -> Tuple[int, int]:
         return 1, 1
 
     return 1, 1
+
