@@ -39,3 +39,4 @@ def test_cannot_transfer_non_positive_amount():
     repo = setup_repo()
     with pytest.raises(Exception):
         transfer_funds("user1", "A", "B", 0.0, repo)
+

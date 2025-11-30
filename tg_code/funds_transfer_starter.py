@@ -38,3 +38,4 @@ def transfer_funds(current_user_id: str, source_account_id: str, target_account_
     # TODO: implement proper checks and transactional transfer
     repo.debit(source_account_id, amount)
     repo.credit(target_account_id, amount)
+

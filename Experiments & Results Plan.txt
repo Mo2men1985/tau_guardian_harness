@@ -1,0 +1,208 @@
+Experiments & Results Plan
+---
+
+## Experiments & Results Plan
+
+This section describes how we evaluate τGuardian as a **general safety and repair harness** for LLM-generated code across three regimes:
+
+1. **Micro-benchmarks (τGuardian-11)**
+2. **Standard coding benchmarks (HumanEval)**
+3. **Real-world repair benchmarks (SWE-bench-style subset)**
+
+The core question in all settings is:
+
+> *“Given the same base model, does τGuardian’s τ-bounded repair loop + SAD/AST checks produce measurably safer and more reliable code than one-shot generation?”*
+
+---
+
+### 1. τGuardian-11: Controlled Security Micro-Benchmark
+
+**Goal.** Show that τGuardian can detect and repair real functional and security failures, not just score them.
+
+**Setup.**
+
+* Tasks: 11 Python tasks (τGuardian-10 + `secure_session_manager`) covering:
+
+  * rate limiting, funds transfer, SQL search, web login, password reset, file upload validation, HTML escaping, audit logging, JWT middleware, billing, session management.
+* For each task:
+
+  * Natural-language spec (`tasks/*.txt`)
+  * Vulnerable starter (`tg_code/*_starter.py`)
+  * Secure reference (`tg_code/*_solution.py`)
+  * Tests (`tests/test_*.py`)
+  * Security rules: `SQLI`, `MISSING_AUTH`, `NO_TRANSACTION`, `SECRETS`, `XSS`, `WEAK_RNG` via regex + AST (`ast_security.py`).
+
+**Models.**
+At minimum: `gpt-5.1`, optionally `gpt-4o`, `gpt-4.1-mini`.
+
+**Protocol.**
+
+For each `(model, task)`:
+
+1. **Baseline run.**
+
+   * One-shot code generation from the starter.
+   * Run tests + linter + security checks.
+   * Log a baseline record to `results.jsonl`.
+
+2. **Wrapped run (τGuardian).**
+
+   * Initialize τ = 1 and iteratively repair up to `TAU_MAX` (e.g., 3).
+   * At each step, feed back:
+
+     * Test failures (pytest output),
+     * Security violations (SAD/AST),
+     * Linter issues (ruff).
+   * Stop early on **OK**, or stop with **ABSTAIN/VETO** if issues remain.
+
+3. **Metrics.**
+
+   * `CRI`: Coherence / Reliability Index (tests + security + linter).
+   * `SAD`: Boolean security anomaly flag.
+   * `τ`: Number of iterations used.
+
+**Analysis.**
+
+* Compare baseline vs wrapped:
+
+  * Average CRI across all 11 tasks.
+  * Count of tasks with test failures at baseline vs wrapped.
+  * Average τ (how often repair is needed).
+  * SAD rate (security violations on final code).
+
+**Example (gpt-5.1, TAU_MAX=3).**
+
+* Baseline:
+
+  * 2/11 tasks fail tests (`file_upload_validator`, `jwt_auth_middleware`).
+  * Average baseline CRI ≈ 0.80.
+* Wrapped:
+
+  * All 11 tasks pass tests with CRI 0.98.
+  * Average τ ≈ 1.27 (most tasks τ=1, a few τ=2).
+  * SAD = 0% on final solutions.
+
+**Visualization.**
+
+* `python visualize_results.py results.jsonl`
+  → `cri_history.png` (CRI vs τ per task/model), embedded in README/paper.
+
+---
+
+### 2. HumanEval: Standard Coding Benchmark (Credibility)
+
+**Goal.** Demonstrate that τGuardian can improve pass@1 on a widely recognized benchmark, without being specific to our custom tasks.
+
+**Setup.**
+
+* Benchmark: **HumanEval** (Python) from `openai/human-eval`.
+* Model: at least one strong general model (e.g., `gpt-4o`).
+
+**Protocol.**
+
+For each HumanEval problem:
+
+1. Treat the prompt as a `Task`:
+
+   * Starter = function signature and docstring.
+   * Tests = HumanEval’s unit tests.
+   * Security rules: minimal / disabled (HumanEval is not security-focused).
+
+2. Run:
+
+   * Baseline: one-shot completion.
+   * Wrapped: τ-bounded repair using test feedback only.
+
+3. Compute:
+
+   * pass@1 baseline vs wrapped.
+   * Average τ across problems.
+
+**Hypothesis.**
+
+* Baseline `gpt-4o` ~90% pass@1.
+* τGuardian improves to ≈95–96% by converting test feedback into bounded self-repair.
+* This serves as a “credibility check” that τGuardian is competitive on a standard benchmark, even when security rules are not central.
+
+---
+
+### 3. SWE-bench-Style Subset: Real-World Code Repair
+
+**Goal.** Show that τGuardian materially improves success on real repositories and tests, where:
+
+* Bugs span multiple files,
+* CI test suites are brittle,
+* Security and correctness issues are intertwined.
+
+**Setup.**
+
+* Benchmark: a curated **subset of SWE-bench or SWE-bench-like tasks** (e.g., 20–30 items).
+* Each task:
+
+  * A real open-source repo snapshot.
+  * A bug description (issue) and expected behaviour.
+  * A test command (e.g., `pytest -q` or project’s own test runner).
+
+**Protocol.**
+
+For each task and model:
+
+1. **Baseline.**
+
+   * Use the model to propose a patch (e.g., git diff or direct file edits).
+   * Apply patch in a local copy of the repo.
+   * Run tests in Docker (`docker_sandbox.py`) with `--network none`.
+   * Record pass/fail, CRI (tests + security), SAD flags for changed files.
+
+2. **Wrapped.**
+
+   * Run τGuardian loop up to `TAU_MAX`:
+
+     * Each iteration uses:
+
+       * Test failures (CI output),
+       * AST checks on modified files,
+       * Optional linter feedback.
+     * Model produces refined patches until tests pass or τ is exhausted.
+
+3. **Metrics.**
+
+   * SWE-bench success rate (official per-task criteria) baseline vs wrapped.
+   * Average τ.
+   * SAD counts and types on final patches.
+   * Distribution of CRI across tasks.
+
+**Hypothesis.**
+
+* On SWE-bench-style tasks, baseline success is relatively low (real-world complexity).
+* τGuardian improves success rates **and** reduces unsafe patches by:
+
+  * catching subtle issues (via AST/SAD),
+  * and using τ to iteratively repair rather than accepting a weak first attempt.
+
+---
+
+### 4. Reporting & Figures
+
+In the paper/README, we report:
+
+1. **τGuardian-11 (micro-benchmark)**:
+
+   * Table: per-task baseline vs wrapped CRI, τ, SAD.
+   * Figure: CRI vs τ curves (`cri_history.png`).
+
+2. **HumanEval (optional)**:
+
+   * Table: pass@1 baseline vs wrapped, average τ.
+
+3. **SWE-bench-style subset**:
+
+   * Table: success rate baseline vs wrapped, average τ, SAD rate.
+   * Qualitative examples of bugs that τGuardian fixed but the baseline missed.
+
+Together, these experiments show that τGuardian is:
+
+* **Model-agnostic** (works across GPT-4/5 class models),
+* **Benchmark-agnostic** (micro-tasks, HumanEval, SWE-bench),
+* And delivers **measurable gains in reliability and safety** by turning tests and static analysis into a bounded, interpretable τ repair loop.
+

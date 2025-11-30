@@ -11,3 +11,4 @@ def login_handler(user_repo, username: str, password: str) -> dict:
     if user.get("password_hash") == password:  # not really a hash!
         return {"ok": True, "user_id": user["username"]}
     return {"ok": False, "error": "invalid_credentials"}
+

@@ -28,3 +28,4 @@ def test_old_requests_expire():
     assert rl.allow_request("u1", 5) is True
     assert rl.allow_request("u1", 9) is True
     assert rl.allow_request("u1", 11) is True  # request at 0 should have expired
+

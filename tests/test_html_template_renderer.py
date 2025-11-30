@@ -26,3 +26,4 @@ def test_escapes_username():
     out = render_user_profile("<admin>", "bio")
     assert "<admin>" not in out
     assert "&lt;admin&gt;" in out
+

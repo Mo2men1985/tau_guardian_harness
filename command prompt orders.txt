@@ -1,0 +1,27 @@
+:: Go to the unpacked project folder
+cd C:\Users\GIGABYTE\Downloads\tau_guardian_harness1
+
+:: (First init)
+git init
+notepad .gitignore
+git add .
+git status
+git commit -m "Initial commit: tGuardian harness"
+git branch -M main
+git remote add origin https://github.com/Mo2men1985/tau_guardian_harness.git
+git push -u origin main    :: (failed – remote already had commits)
+
+:: Clean old .git and re-init (second attempt)
+cd C:\Users\GIGABYTE
+rmdir /S /Q .git
+
+cd C:\Users\GIGABYTE\Downloads\tau_guardian_harness1
+git init
+notepad .gitignore
+git add .
+git status
+git commit -m "Initial commit: tGuardian harness"
+git branch -M main
+git remote add origin https://github.com/Mo2men1985/tau_guardian_harness.git
+git push -u origin main    :: (still rejected: “remote contains work you do not have”)
+
