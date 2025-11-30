@@ -129,3 +129,4 @@ python harness.py
 ```
 
 τGuardian will log both **baseline** and **τ-bounded wrapped** runs to `results.jsonl`, including CRI, SAD, and per-task τ statistics.
+

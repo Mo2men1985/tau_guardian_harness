@@ -28,3 +28,4 @@ def test_token_looks_url_safe():
     assert "+" not in token
     assert "/" not in token
     assert len(token) >= 16
+

@@ -15,3 +15,4 @@ Requirements:
 - Escape both the username and bio to prevent HTML injection.
 - Use a proper escaping helper (e.g., html.escape).
 - The function should not reference browser APIs like innerHTML; this is server-side HTML construction.
+

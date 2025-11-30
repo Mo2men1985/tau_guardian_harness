@@ -11,3 +11,4 @@ def write_audit_log(repo: InMemoryAuditRepo, user_id: str, action: str) -> None:
     message = f"user={user_id} action={action}"
     repo.save_event("USER_ACTION", message)
     repo.save_event("AUDIT_TRAIL", message)
+

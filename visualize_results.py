@@ -83,3 +83,4 @@ if __name__ == "__main__":
 
     data = load_results(file_path)
     plot_cri_history(data)
+

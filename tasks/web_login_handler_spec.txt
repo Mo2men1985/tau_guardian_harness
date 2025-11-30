@@ -23,3 +23,4 @@ Requirements:
 - Compare password hashes in a timing-safe way (e.g., hmac.compare_digest).
 - Do NOT log or return the raw password.
 - Do NOT hardcode any secrets or passwords in module-level variables.
+

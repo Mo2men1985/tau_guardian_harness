@@ -19,3 +19,4 @@ You may implement a very simplified token format suitable for unit tests, e.g.:
 where `signature` is an HMAC over `user_id` using `secret_key`.
 
 Do NOT hardcode the secret key in the module.
+

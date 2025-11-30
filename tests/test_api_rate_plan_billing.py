@@ -43,3 +43,4 @@ def test_invalid_inputs():
         pass
     else:
         assert False, "Expected ValueError for unknown plan"
+

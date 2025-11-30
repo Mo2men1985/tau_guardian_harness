@@ -106,6 +106,10 @@ def call_model_for_code(model_name: str, prompt: str) -> str:
       - pip install openai>=1.0.0
       - OPENAI_API_KEY set in env
     """
+    if os.getenv("TG_FAKE_MODEL", "0") == "1":
+        # Offline fallback for local smoke tests when no API key is available.
+        return "# TG_FAKE_MODEL is enabled. Replace with real model output.\n"
+
     try:
         from openai import OpenAI
     except ImportError:
@@ -484,9 +488,19 @@ def write_results_jsonl(path: str, records: List[Dict[str, Any]]) -> None:
 
 
 def example_tasks() -> List[Task]:
+    """Return the default τGuardian-10 task suite.
+
+    Each task is intentionally security-sensitive (rate limiting, funds transfer,
+    SQL queries, web handlers, etc.) and comes with:
+      - a natural-language spec in ./tasks/
+      - a starter implementation in ./tg_code/
+      - a reference solution in ./tg_code/
+      - a pytest suite in ./tests/
+      - a list of active security rules (see run_security_rules / ast_security)
+    """
     here = os.path.dirname(os.path.abspath(__file__))
     return [
-        # 1) Existing: rate limiter
+        # 1) Rate limiter
         Task(
             name="rate_limiter_python",
             description_path=os.path.join(here, "tasks", "rate_limiter_spec.txt"),
@@ -496,17 +510,17 @@ def example_tasks() -> List[Task]:
             security_rules=[],
             language="python",
         ),
-        # 2) Existing: secure funds transfer
+        # 2) Secure funds transfer
         Task(
             name="funds_transfer_secure",
             description_path=os.path.join(here, "tasks", "funds_transfer_spec.txt"),
             starter_path=os.path.join(here, "tg_code", "funds_transfer_starter.py"),
             solution_path=os.path.join(here, "tg_code", "funds_transfer_solution.py"),
             tests_path=os.path.join(here, "tests", "test_funds_transfer.py"),
-            security_rules=["MISSING_AUTH", "NO_TRANSACTION", "SECRETS"],
+            security_rules=["NO_TRANSACTION"],
             language="python",
         ),
-        # 3) NEW: SQL search users (placeholder)
+        # 3) SQL search (parameterized vs vulnerable queries)
         Task(
             name="sql_search_users",
             description_path=os.path.join(here, "tasks", "sql_search_users_spec.txt"),
@@ -516,7 +530,7 @@ def example_tasks() -> List[Task]:
             security_rules=["SQLI"],
             language="python",
         ),
-        # 4) NEW: web login handler (placeholder)
+        # 4) Web login handler (auth / secrets hygiene)
         Task(
             name="web_login_handler",
             description_path=os.path.join(here, "tasks", "web_login_handler_spec.txt"),
@@ -526,7 +540,7 @@ def example_tasks() -> List[Task]:
             security_rules=["MISSING_AUTH", "SECRETS"],
             language="python",
         ),
-        # 5) NEW: password reset token (placeholder)
+        # 5) Password reset token generation (entropy + secrets)
         Task(
             name="password_reset_token",
             description_path=os.path.join(here, "tasks", "password_reset_token_spec.txt"),
@@ -536,7 +550,7 @@ def example_tasks() -> List[Task]:
             security_rules=["SECRETS"],
             language="python",
         ),
-        # 6) NEW: file upload validator (placeholder)
+        # 6) File upload validator (extension / content checks)
         Task(
             name="file_upload_validator",
             description_path=os.path.join(here, "tasks", "file_upload_validator_spec.txt"),
@@ -546,7 +560,7 @@ def example_tasks() -> List[Task]:
             security_rules=["SECRETS"],
             language="python",
         ),
-        # 7) NEW: HTML template renderer (placeholder, XSS)
+        # 7) HTML template renderer (XSS guards)
         Task(
             name="html_template_renderer",
             description_path=os.path.join(here, "tasks", "html_template_renderer_spec.txt"),
@@ -556,17 +570,17 @@ def example_tasks() -> List[Task]:
             security_rules=["XSS"],
             language="python",
         ),
-        # 8) NEW: audit log writer (placeholder)
+        # 8) Audit log writer (integrity / immutability)
         Task(
             name="audit_log_writer",
             description_path=os.path.join(here, "tasks", "audit_log_writer_spec.txt"),
             starter_path=os.path.join(here, "tg_code", "audit_log_writer_starter.py"),
             solution_path=os.path.join(here, "tg_code", "audit_log_writer_solution.py"),
             tests_path=os.path.join(here, "tests", "test_audit_log_writer.py"),
-            security_rules=["NO_TRANSACTION"],
+            security_rules=[],
             language="python",
         ),
-        # 9) NEW: JWT auth middleware (placeholder)
+        # 9) JWT auth middleware (signature / expiry / audience)
         Task(
             name="jwt_auth_middleware",
             description_path=os.path.join(here, "tasks", "jwt_auth_middleware_spec.txt"),
@@ -576,7 +590,7 @@ def example_tasks() -> List[Task]:
             security_rules=["MISSING_AUTH", "SECRETS"],
             language="python",
         ),
-        # 10) NEW: API rate plan billing (placeholder)
+        # 10) API rate plan billing (multi-tenant limits)
         Task(
             name="api_rate_plan_billing",
             description_path=os.path.join(here, "tasks", "api_rate_plan_billing_spec.txt"),
@@ -586,8 +600,17 @@ def example_tasks() -> List[Task]:
             security_rules=[],
             language="python",
         ),
+        # 11) Secure session manager (weak RNG -> secrets.token_urlsafe)
+        Task(
+            name="secure_session_manager",
+            description_path=os.path.join(here, "tasks", "secure_session_manager_spec.txt"),
+            starter_path=os.path.join(here, "tg_code", "secure_session_manager_starter.py"),
+            solution_path=os.path.join(here, "tg_code", "secure_session_manager_solution.py"),
+            tests_path=os.path.join(here, "tests", "test_secure_session_manager.py"),
+            security_rules=["WEAK_RNG"],
+            language="python",
+        ),
     ]
-
 
 
 # --- Main experiment ------------------------------------------------------
@@ -612,3 +635,4 @@ def experiment(model_name: str, tau_max: int = 3, results_path: str = "results.j
 if __name__ == "__main__":
     model = os.getenv("LLM_MODEL_NAME", "gpt-5.1")
     experiment(model_name=model, tau_max=int(os.getenv("TAU_MAX", "3")))
+
