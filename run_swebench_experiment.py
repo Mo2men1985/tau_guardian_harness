@@ -1,3 +1,4 @@
+
 """Command-line entrypoint to run τGuardian on SWE-bench tasks."""
 
 import argparse
@@ -79,11 +80,6 @@ def main() -> None:
     wrapped_pass = 0
     total_tasks = 0
     seen_tasks = set()
-    baseline_pass_rates = []
-    wrapped_pass_rates = []
-    baseline_cri = []
-    wrapped_cri = []
-    wrapped_tau = []
 
     try:
         with open(args.output, "r", encoding="utf-8") as f:
@@ -99,38 +95,18 @@ def main() -> None:
                     total_tasks += 1
                     if task_name is not None:
                         seen_tasks.add(task_name)
-                    pass_rate = rec.get("test_pass_rate")
-                    if pass_rate is not None:
-                        baseline_pass_rates.append(pass_rate)
-                        if pass_rate == 1.0:
-                            baseline_pass += 1
-                    cri_val = rec.get("cri")
-                    if cri_val is not None:
-                        baseline_cri.append(cri_val)
+                    if rec.get("test_pass_rate") == 1.0:
+                        baseline_pass += 1
                 elif rec_type == "wrapped":
-                    pass_rate = rec.get("last_test_pass_rate")
-                    if pass_rate is not None:
-                        wrapped_pass_rates.append(pass_rate)
-                        if pass_rate == 1.0:
-                            wrapped_pass += 1
-                    cri_val = rec.get("last_cri")
-                    if cri_val is not None:
-                        wrapped_cri.append(cri_val)
-                    tau_val = rec.get("last_tau")
-                    if tau_val is not None:
-                        wrapped_tau.append(tau_val)
+                    # last_test_pass_rate is the pass rate after final τ iteration
+                    if rec.get("last_test_pass_rate") == 1.0:
+                        wrapped_pass += 1
     except FileNotFoundError:
         print(f"Results file {args.output} not found, skipping summary.")
         return
 
     if total_tasks == 0 and seen_tasks:
         total_tasks = len(seen_tasks)
-
-    avg_baseline_rate = sum(baseline_pass_rates) / len(baseline_pass_rates) if baseline_pass_rates else 0.0
-    avg_wrapped_rate = sum(wrapped_pass_rates) / len(wrapped_pass_rates) if wrapped_pass_rates else 0.0
-    avg_baseline_cri = sum(baseline_cri) / len(baseline_cri) if baseline_cri else 0.0
-    avg_wrapped_cri = sum(wrapped_cri) / len(wrapped_cri) if wrapped_cri else 0.0
-    avg_wrapped_tau = sum(wrapped_tau) / len(wrapped_tau) if wrapped_tau else 0.0
 
     print("\n" + "=" * 60)
     print("SWE-bench Results Summary")
@@ -141,14 +117,6 @@ def main() -> None:
         print(f"Wrapped pass rate   : {wrapped_pass}/{total_tasks} ({wrapped_pass/total_tasks*100:.1f}%)")
         improvement = (wrapped_pass - baseline_pass) / total_tasks * 100.0
         print(f"Improvement         : {improvement:+.1f} percentage points")
-        print(f"Avg baseline test pass rate : {avg_baseline_rate:.3f}")
-        print(f"Avg wrapped test pass rate  : {avg_wrapped_rate:.3f}")
-        if baseline_cri:
-            print(f"Avg baseline CRI            : {avg_baseline_cri:.3f}")
-        if wrapped_cri:
-            print(f"Avg wrapped CRI             : {avg_wrapped_cri:.3f}")
-        if wrapped_tau:
-            print(f"Avg wrapped τ               : {avg_wrapped_tau:.3f}")
     else:
         print("No tasks found in results; nothing to summarize.")
     print("=" * 60 + "\n")
@@ -156,3 +124,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

@@ -1,12 +1,27 @@
+
 import os
 import re
 import json
 import subprocess
 from dataclasses import dataclass
+from llm_client import generate_code_from_env
 from typing import List, Optional, Tuple, Dict, Any, Literal
 
 from ast_security import run_ast_security_checks
 from docker_sandbox import run_tests_in_sandbox, parse_pytest_sandbox_output
+
+# Optional: OpenAI client (for existing behavior)
+try:
+    from openai import OpenAI  # type: ignore[import]
+except ImportError:  # pragma: no cover
+    OpenAI = None  # type: ignore[assignment]
+
+# Optional: Google GenAI client for Gemini
+try:
+    from google import genai  # type: ignore[import]
+except ImportError:  # pragma: no cover
+    genai = None  # type: ignore[assignment]
+
 
 # --- Task + result models -------------------------------------------------
 
@@ -99,30 +114,26 @@ def run_shell_command(cmd: List[str], cwd: Optional[str] = None, timeout: int = 
 
 # --- Model call -----------------------------------------------------------
 
-def call_model_for_code(model_name: str, prompt: str) -> str:
-    """Concrete example for GPT-5.1-style models using the OpenAI client.
 
-    Requires:
-      - pip install openai>=1.0.0
-      - OPENAI_API_KEY set in env
-    """
+def _call_openai_chat(model: str, prompt: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
+    """Call OpenAI chat completion for code generation."""
+    if OpenAI is None:
+        raise RuntimeError(
+            "OpenAI client not installed. Install `openai` or set LLM_PROVIDER=gemini."
+        )
+
     if os.getenv("TG_FAKE_MODEL", "0") == "1":
         # Offline fallback for local smoke tests when no API key is available.
         return "# TG_FAKE_MODEL is enabled. Replace with real model output.\n"
 
-    try:
-        from openai import OpenAI
-    except ImportError:
-        raise RuntimeError("openai package not installed. Run `pip install openai`.")
-
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set in environment.")
+        raise RuntimeError("OPENAI_API_KEY is not set in the environment.")
 
     client = OpenAI(api_key=api_key)
 
     resp = client.chat.completions.create(
-        model=model_name,
+        model=model,
         messages=[
             {
                 "role": "system",
@@ -134,13 +145,48 @@ def call_model_for_code(model_name: str, prompt: str) -> str:
             },
             {"role": "user", "content": prompt},
         ],
-        temperature=0.1,
+        temperature=temperature,
     )
     text = resp.choices[0].message.content or ""
     return text
 
 
-# --- Parsing helpers ------------------------------------------------------
+def _call_gemini_chat(model: str, prompt: str, temperature: float = 0.0, max_tokens: int = 1024) -> str:
+    """Call Gemini via the Google GenAI SDK for code generation."""
+    if genai is None:
+        raise RuntimeError(
+            "Google GenAI SDK not installed. Run `pip install google-genai` or switch LLM_PROVIDER."
+        )
+
+    # The client will pick up GEMINI_API_KEY / GOOGLE_API_KEY from env.
+    client = genai.Client()
+
+    response = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        # Uncomment to control generation more tightly if desired:
+        # config={
+        #     "temperature": temperature,
+        #     "max_output_tokens": max_tokens,
+        # },
+    )
+
+    # For text-only usage, .text is the simplest accessor.
+    return getattr(response, "text", "") or ""
+
+
+
+def call_model_for_code(model_name: str, prompt: str, temperature: float = 0.0, max_tokens: int = 512) -> str:
+    """Provider-agnostic wrapper for τGuardian runtime harness.
+
+    The concrete provider (OpenAI, Gemini, or Fake) is selected via environment
+    variables and implemented in llm_client.generate_code_from_env().
+    The temperature and max_tokens parameters are accepted for backward
+    compatibility but are currently controlled inside llm_client via
+    environment variables such as LLM_TEMPERATURE and LLM_MAX_TOKENS.
+    """
+    return generate_code_from_env(prompt, model_name=model_name)
+
 
 def extract_code_from_response(text: str) -> str:
     """Extract code from LLM response, handling fenced and unfenced formats."""
@@ -633,6 +679,7 @@ def experiment(model_name: str, tau_max: int = 3, results_path: str = "results.j
 
 
 if __name__ == "__main__":
-    model = os.getenv("LLM_MODEL_NAME", "gpt-5.1")
+    model = os.getenv("LLM_MODEL_NAME", "gpt-4o")
     experiment(model_name=model, tau_max=int(os.getenv("TAU_MAX", "3")))
+
 
