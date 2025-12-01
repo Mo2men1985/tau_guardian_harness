@@ -580,10 +580,14 @@ def load_swebench_tasks(
         repo_workspace.mkdir(exist_ok=True)
 
         repo_path = repo_workspace / repo_name.split("/")[-1]
+        repo_url = f"https://github.com/{repo_name}.git"
 
         if not repo_path.exists():
             print(f"  [{i + 1}/{limit}] Cloning {repo_name}...")
-            subprocess.run(["git", "clone", repo_url, str(repo_path)], cwd=None,capture_output=True,
+            subprocess.run(
+                ["git", "clone", repo_url, str(repo_path)],
+                cwd=None,
+                capture_output=True,
                 text=True,
             )
             subprocess.run(
