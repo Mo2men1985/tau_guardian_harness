@@ -1,3 +1,4 @@
+
 """
 SWE-bench-style wiring for τGuardian.
 
@@ -36,8 +37,7 @@ class SweTask:
     Assumptions:
       - repo_path points to a local working copy of the repository.
       - tests_path is a path inside that repo that pytest can target
-        (e.g., "tests", "tests/test_bug.py"). This may be None for some
-        SWE-bench instances; downstream code must tolerate that.
+        (e.g., "tests", "tests/test_bug.py").
       - test_command (optional) overrides the default `pytest -q tests_path`.
       - security_rules uses the same tags as τGuardian-10:
           ["SQLI", "MISSING_AUTH", "NO_TRANSACTION", "SECRETS", "XSS", "WEAK_RNG", ...]
@@ -48,7 +48,7 @@ class SweTask:
     name: str
     repo_path: str
     description: str
-    tests_path: Optional[str] = "tests"
+    tests_path: str = "tests"
     test_command: Optional[List[str]] = None
     security_rules: Optional[List[str]] = None
     python_files: Optional[List[str]] = None  # relative paths inside repo
@@ -71,52 +71,71 @@ class SweConfig:
 # ---------------------------------------------------------------------------
 
 
-def apply_model_patch_to_repo(task: SweTask, patch_text: str) -> None:
-    """Apply a model-generated patch to task.repo_path.
+
+def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "model") -> bool:
+    """Apply a patch to task.repo_path.
+
+    This is used for model-generated patches today, and can also be used
+    for ground-truth SWE-bench patches in the future by passing
+    ``source="ground_truth"`` and the exact ``instance["patch"]`` string.
 
     Strategy:
-      1. First try `git apply` (for unified diffs).
-      2. If that fails, fall back to a simple `file: path.py` + content format.
+      1. First try `git apply` with the patch text as-is from the correct
+         repo root (task.repo_path).
+      2. If that fails:
+         - By default, mark the patch as "unpatchable" and return False.
+         - Optionally, if TG_SWE_ENABLE_PATCH_FALLBACK=1, try the older
+           "file: path.py" rewrite mode for non-diff patches.
 
-    This lets the model return either:
-      - A standard unified diff (git apply compatible), or
-      - One or more explicit file rewrites, e.g.:
-
-            file: src/module_a.py
-            <full new contents>
-
-            file: tests/test_bug.py
-            <full new contents>
+    Returns:
+      True  -> patch applied (via git or fallback)
+      False -> patch could not be applied; caller may treat this as
+               "patch_error" for logging or metrics.
     """
+    from pathlib import Path
 
-    repo_path = Path(task.repo_path)
-    repo_path.mkdir(parents=True, exist_ok=True)
+    repo_path = Path(task.repo_path).resolve()
 
-    # Save the raw model patch to a temporary file for git apply
+    if not patch_text or not patch_text.strip():
+        print(f"  ⚠ [patch:{source}] Empty patch text; skipping apply")
+        return False
+
+    # --- Attempt 1: git apply from repo root ---
+    print(f"  [patch:{source}] Trying git apply in {repo_path}")
+
+    # Write the patch exactly as received to a temporary file.
     with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False, encoding="utf-8") as f:
         f.write(patch_text)
         patch_file = f.name
 
     try:
-        # Attempt 1: unified diff via git apply
         result = subprocess.run(
-            ["git", "apply", "--whitespace=fix", patch_file],
+            ["git", "apply", patch_file],
             cwd=repo_path,
             capture_output=True,
             text=True,
         )
 
         if result.returncode == 0:
-            print("  ✓ Applied patch via git apply")
-            return
+            print(f"  ✓ [patch:{source}] Applied patch via git apply")
+            return True
 
-        print("  ⚠ git apply failed, falling back to file rewrite mode")
+        print(f"  ⚠ [patch:{source}] git apply failed (exit {result.returncode}); marking as patch_error")
         if result.stdout.strip():
             print("  [git apply stdout]", result.stdout.strip())
         if result.stderr.strip():
-            print("  [git apply stderr]", result.stderr.strip())
+            # Log only the first few lines to keep output readable.
+            stderr_lines = result.stderr.strip().splitlines()
+            head = stderr_lines[:5]
+            print("  [git apply stderr]", "\n    ".join(head))
 
-        # Attempt 2: explicit file rewrite format (file: path/to/file.py)
+        # If fallback is disabled, we stop here.
+        if os.getenv("TG_SWE_ENABLE_PATCH_FALLBACK", "0") != "1":
+            print(f"  ⚠ [patch:{source}] Fallback disabled; treating as unpatchable patch")
+            return False
+
+        # --- Optional Attempt 2: explicit file rewrite format ---
+        print(f"  [patch:{source}] Falling back to file rewrite mode")
         lines: List[str] = patch_text.strip().splitlines()
         file_pattern = re.compile(r"^(?:file:|#|//)\s*([^\s]+\.py)", re.IGNORECASE)
 
@@ -132,34 +151,34 @@ def apply_model_patch_to_repo(task: SweTask, patch_text: str) -> None:
                     full_path = repo_path / current_file
                     full_path.parent.mkdir(parents=True, exist_ok=True)
                     full_path.write_text("\n".join(file_content), encoding="utf-8")
-                    print(f"  ✓ Wrote {current_file}")
+                    print(f"  ✓ [patch:{source}] Wrote {current_file}")
                     files_written += 1
 
                 # Start a new file block
                 current_file = m.group(1)
                 file_content = []
-            elif current_file:
+            else:
                 file_content.append(line)
 
-        # Flush the last file
+        # Flush final file
         if current_file and file_content:
             full_path = repo_path / current_file
             full_path.parent.mkdir(parents=True, exist_ok=True)
             full_path.write_text("\n".join(file_content), encoding="utf-8")
-            print(f"  ✓ Wrote {current_file}")
+            print(f"  ✓ [patch:{source}] Wrote {current_file}")
             files_written += 1
 
         if files_written == 0:
-            print("  ⚠ Could not parse patch format; no files written")
+            print(f"  ⚠ [patch:{source}] Could not parse fallback patch format; no files written")
+            return False
+
+        return True
 
     finally:
-        # Clean up temp patch file
         try:
             os.unlink(patch_file)
         except OSError:
             pass
-
-
 def get_repo_structure(repo_path: Path, max_depth: int = 3, max_lines: int = 50) -> str:
     """Return a small directory tree for fallback context."""
 
@@ -225,18 +244,17 @@ def snapshot_relevant_code(task: SweTask) -> str:
                     snapshot_parts.append(f"=== {file} ===\n{content}\n")
 
     # 3) Always include test file(s) if available
-    if task.tests_path:
-        test_path = repo_path / task.tests_path
-        if test_path.exists():
-            if test_path.is_file():
-                content = test_path.read_text(encoding="utf-8")
-                snapshot_parts.append(f"=== {task.tests_path} (tests) ===\n{content}\n")
-            elif test_path.is_dir():
-                test_files = sorted(test_path.rglob("test_*.py"))[:3]
-                for tf in test_files:
-                    rel = str(tf.relative_to(repo_path))
-                    content = tf.read_text(encoding="utf-8")
-                    snapshot_parts.append(f"=== {rel} (tests) ===\n{content}\n")
+    test_path = repo_path / task.tests_path
+    if test_path.exists():
+        if test_path.is_file():
+            content = test_path.read_text(encoding="utf-8")
+            snapshot_parts.append(f"=== {task.tests_path} (tests) ===\n{content}\n")
+        elif test_path.is_dir():
+            test_files = sorted(test_path.rglob("test_*.py"))[:3]
+            for tf in test_files:
+                rel = str(tf.relative_to(repo_path))
+                content = tf.read_text(encoding="utf-8")
+                snapshot_parts.append(f"=== {rel} (tests) ===\n{content}\n")
 
     # 4) Ultimate fallback: directory structure
     if not snapshot_parts:
@@ -255,21 +273,10 @@ def run_swe_tests(task: SweTask, cfg: SweConfig) -> harness.CheckResults:
     """Run the repository's tests for this SWE task."""
 
     repo = os.path.abspath(task.repo_path)
-    repo_path = Path(repo)
-    default_target = task.tests_path or "tests"
+    tests_path = os.path.join(repo, task.tests_path)
 
     if cfg.use_sandbox:
-        if not task.tests_path:
-            output = "[SWE] Sandbox mode requires tests_path; none provided."
-            return harness.CheckResults(
-                total_tests=0,
-                tests_failed=1,
-                tests_output=output,
-                security_violations=[],
-                linter_errors=[],
-            )
-
-        tests_path = os.fspath(repo_path / task.tests_path)
+        # Docker sandbox
         exit_code, output = run_tests_in_sandbox(
             test_file_path=tests_path,
             project_root=repo,
@@ -277,7 +284,7 @@ def run_swe_tests(task: SweTask, cfg: SweConfig) -> harness.CheckResults:
         )
         total, failed = parse_pytest_sandbox_output(output)
     else:
-        cmd = task.test_command or ["pytest", "-q", default_target]
+        cmd = task.test_command or ["pytest", "-q", task.tests_path]
         exit_code, output = harness.run_shell_command(cmd, cwd=repo)
         total, failed = harness.parse_pytest_output(output)
 
@@ -354,6 +361,7 @@ def aggregate_swe_checks(task: SweTask, cfg: SweConfig, tau_step: int) -> Tuple[
 # ---------------------------------------------------------------------------
 
 
+
 def build_swe_prompt(
     task: SweTask,
     is_repair: bool,
@@ -366,6 +374,7 @@ def build_swe_prompt(
     code_snapshot = snapshot_relevant_code(task)
 
     if not is_repair:
+        # Initial attempt: strongly constrain the model to emit a unified diff only.
         return (
             base_desc
             + "You are given a real Python repository with failing tests.\n"
@@ -374,19 +383,30 @@ def build_swe_prompt(
               "```python\n"
             + code_snapshot
             + "\n```\n\n"
-              "Return ONLY the patch, as either:\n"
-              "  - a unified diff (git apply compatible), or\n"
-              "  - explicit file blocks in the form:\n"
-              "      file: path/to/file.py\n"
-              "      <full rewritten content>\n"
+              "CRITICAL: Return ONLY a valid unified diff patch in this EXACT format:\n\n"
+              "diff --git a/path/to/file.py b/path/to/file.py\n"
+              "--- a/path/to/file.py\n"
+              "+++ b/path/to/file.py\n"
+              "@@ -10,7 +10,7 @@ def function_name():\n"
+              " context line\n"
+              "-old line\n"
+              "+new line\n"
+              " context line\n\n"
+              "Rules:\n"
+              "1. Start with 'diff --git a/FILE b/FILE' for each file you modify.\n"
+              "2. Include both '--- a/FILE' and '+++ b/FILE' headers.\n"
+              "3. Each hunk MUST have complete @@ headers like '@@ -X,Y +A,B @@'.\n"
+              "4. Do NOT include explanations, markdown fences, or comments outside the diff.\n"
+              "5. Output ONLY the raw patch text.\n"
         )
 
     assert checks is not None
+
     return (
         base_desc
-        + "Your previous patch did not fully solve the problem.\n"
-          "Here is the latest test + linter + security output:\n\n"
-        + checks.tests_output
+        + "Your previous patch failed to apply or did not solve the problem.\n"
+          "Here is the latest test, linter, and security output:\n\n"
+        + (checks.tests_output or "")
         + "\n\nLinter errors:\n"
         + "\n".join(checks.linter_errors or [])
         + "\n\nSecurity violations:\n"
@@ -395,14 +415,11 @@ def build_swe_prompt(
         + "```python\n"
         + code_snapshot
         + "\n```\n\n"
-          "Refine your patch. Return ONLY the new patch using the same format as before."
+          "CRITICAL: Return ONLY a valid unified diff patch.\n"
+          "Use the EXACT format from the first attempt.\n"
+          "Start with 'diff --git', include full headers, and complete '@@ -X,Y +A,B @@' lines.\n"
+          "NO explanations, NO markdown fences, ONLY the raw patch text.\n"
     )
-
-
-# ---------------------------------------------------------------------------
-# Baseline / wrapped runs for SWE tasks
-# ---------------------------------------------------------------------------
-
 
 def run_swe_baseline(cfg: SweConfig, task: SweTask) -> harness.BaselineResult:
     """One-shot baseline: single patch from the model, then tests + CRI/SAD."""
@@ -410,7 +427,7 @@ def run_swe_baseline(cfg: SweConfig, task: SweTask) -> harness.BaselineResult:
     prompt = build_swe_prompt(task, is_repair=False, previous_patch=None, checks=None)
     raw = harness.call_model_for_code(cfg.model_name, prompt)
     patch_text = harness.extract_code_from_response(raw)
-    apply_model_patch_to_repo(task, patch_text)
+    apply_model_patch_to_repo(task, patch_text, source="model")
 
     checks, metrics = aggregate_swe_checks(task, cfg, tau_step=0)
 
@@ -442,7 +459,7 @@ def run_swe_wrapped(cfg: SweConfig, task: SweTask) -> harness.WrappedResult:
         )
         raw = harness.call_model_for_code(cfg.model_name, prompt)
         patch_text = harness.extract_code_from_response(raw)
-        apply_model_patch_to_repo(task, patch_text)
+        apply_model_patch_to_repo(task, patch_text, source="model")
 
         checks, metrics = aggregate_swe_checks(task, cfg, tau_step=tau_step)
         decision = harness.decide(metrics, checks, cri_ok_threshold=cfg.cri_ok_threshold)
@@ -501,35 +518,6 @@ def extract_files_from_patch(patch: str) -> List[str]:
     return sorted(set(files))
 
 
-def _infer_tests_path(test_path_value: Optional[str], test_cmd_list: Optional[List[str]]) -> Tuple[Optional[str], Optional[List[str]]]:
-    """Infer tests_path and normalized test_command tokens from SWE metadata."""
-
-    tests_path = test_path_value or None
-    normalized_cmd: Optional[List[str]] = None
-
-    if test_cmd_list:
-        if isinstance(test_cmd_list, str):
-            normalized_cmd = test_cmd_list.split()
-        else:
-            normalized_cmd = list(test_cmd_list)
-    
-    if not tests_path and normalized_cmd:
-        candidates: List[str] = []
-        for tok in normalized_cmd[1:]:
-            token = tok.strip()
-            if not token:
-                continue
-            if "/" in token or "\\" in token or token.endswith(".py") or "tests" in token.lower():
-                candidates.append(token)
-        if candidates:
-            tests_path = candidates[-1]
-
-    if not tests_path:
-        tests_path = "tests"
-
-    return tests_path, normalized_cmd
-
-
 def load_swebench_tasks(
     subset: str = "lite",
     limit: int = 10,
@@ -581,30 +569,24 @@ def load_swebench_tasks(
 
         if not repo_path.exists():
             print(f"  [{i + 1}/{limit}] Cloning {repo_name}...")
-            clone = subprocess.run(
-                ["git", "clone", f"https://github.com/{repo_name}.git", str(repo_path)],
-                cwd=repo_workspace,
-                capture_output=True,
+            subprocess.run(["git", "clone", repo_url, str(repo_path)], cwd=None,capture_output=True,
                 text=True,
             )
-            if clone.returncode != 0:
-                print(f"  ⚠ Failed to clone {repo_name}: {clone.stderr.strip() or clone.stdout.strip()}")
-                continue
-
-            checkout = subprocess.run(
+            subprocess.run(
                 ["git", "checkout", base_commit],
                 cwd=repo_path,
                 capture_output=True,
                 text=True,
             )
-            if checkout.returncode != 0:
-                print(f"  ⚠ Failed to checkout {base_commit} in {repo_name}: {checkout.stderr.strip() or checkout.stdout.strip()}")
-                continue
 
         changed_files = extract_files_from_patch(patch)
         test_cmd = instance.get("test_cmd", None)
-        tests_path_raw = instance.get("test_path") or None
-        tests_path, test_cmd_list = _infer_tests_path(tests_path_raw, test_cmd)
+        if test_cmd:
+            test_cmd_list = test_cmd.split()
+        else:
+            test_cmd_list = None
+
+        tests_path = instance.get("test_path", "tests")
 
         task = SweTask(
             name=instance_id,
@@ -638,21 +620,12 @@ def swe_experiment(
 
     for task in tasks:
         print(f"[SWE] Baseline for {task.name} on {cfg.model_name}...")
-        try:
-            baseline = run_swe_baseline(cfg, task)
-            records.append(harness.summarize_baseline(baseline))
-        except Exception as e:
-            print(f"  ⚠ Baseline failed for {task.name}: {e}")
-            records.append({"model": cfg.model_name, "task": task.name, "type": "error", "phase": "baseline", "error": str(e)})
-            continue
+        baseline = run_swe_baseline(cfg, task)
+        records.append(harness.summarize_baseline(baseline))
 
         print(f"[SWE] Wrapped (tau_max={cfg.tau_max}) for {task.name} on {cfg.model_name}...")
-        try:
-            wrapped = run_swe_wrapped(cfg, task)
-            records.append(harness.summarize_wrapped(wrapped))
-        except Exception as e:
-            print(f"  ⚠ Wrapped run failed for {task.name}: {e}")
-            records.append({"model": cfg.model_name, "task": task.name, "type": "error", "phase": "wrapped", "error": str(e)})
+        wrapped = run_swe_wrapped(cfg, task)
+        records.append(harness.summarize_wrapped(wrapped))
 
     harness.write_results_jsonl(results_path, records)
     print(f"[SWE] Wrote SWE results to {results_path}")
@@ -662,11 +635,11 @@ if __name__ == "__main__":
     # Minimal smoke test wiring: you can replace this with a real SWE-bench load.
     example_task = SweTask(
         name="swe_example_bug",
-        repo_path="/path/to/checkout/of/repo",  # TODO: change
+        repo_path="/path/to/checkout/of/repo",  # replace with an actual checkout path
         description="Fix bug X in project Y so that tests in tests/test_bug.py pass.",
         tests_path="tests/test_bug.py",
         security_rules=["SQLI", "SECRETS"],
-        python_files=["module_a.py", "module_b.py"],  # TODO: change
+        python_files=["module_a.py", "module_b.py"],  # replace with the relevant files
         language="python",
     )
 
@@ -677,3 +650,4 @@ if __name__ == "__main__":
     )
 
     swe_experiment(cfg, tasks=[example_task])
+

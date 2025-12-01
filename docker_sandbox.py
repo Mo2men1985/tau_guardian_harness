@@ -1,4 +1,5 @@
 
+
 import subprocess
 import os
 import re
@@ -56,7 +57,11 @@ def run_tests_in_sandbox(
     except subprocess.TimeoutExpired:
         return 124, f"[ERROR] Sandbox execution timed out after {timeout}s"
     except FileNotFoundError:
-        return 1, "[ERROR] Docker executable not found. Is Docker installed?"
+        return (
+        1,
+        "[ERROR] Docker executable not found. Install Docker from https://docs.docker.com/get-docker/ " \
+        "or disable sandboxing by unsetting TG_SANDBOX or setting TG_SANDBOX=0.",
+    )
     except Exception as e:
         return 1, f"[ERROR] Sandbox failure: {e}"
 
@@ -82,4 +87,5 @@ def parse_pytest_sandbox_output(output: str) -> Tuple[int, int]:
         return 1, 1
 
     return 1, 1
+
 
