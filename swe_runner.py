@@ -96,89 +96,112 @@ def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "mod
 
     repo_path = Path(task.repo_path).resolve()
 
-    if not patch_text or not patch_text.strip():
-        print(f"  ⚠ [patch:{source}] Empty patch text; skipping apply")
+    normalized_patch = patch_text.strip()
+
+    if not normalized_patch or normalized_patch.upper() == "NO_PATCH":
+        print(f"  ⚠ [patch:{source}] Empty or NO_PATCH sentinel; skipping apply")
         return False
 
-    # --- Attempt 1: git apply from repo root ---
-    print(f"  [patch:{source}] Trying git apply in {repo_path}")
-
-    # Write the patch exactly as received to a temporary file.
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False, encoding="utf-8") as f:
-        f.write(patch_text)
-        patch_file = f.name
-
-    try:
-        result = subprocess.run(
-            ["git", "apply", patch_file],
-            cwd=repo_path,
-            capture_output=True,
-            text=True,
+    def _looks_like_unified_diff(block: str) -> bool:
+        return bool(
+            re.search(r"^diff --git", block, re.MULTILINE)
+            or re.search(r"^@@", block, re.MULTILINE)
+            or (
+                re.search(r"^--- ", block, re.MULTILINE)
+                and re.search(r"^\+\+\+ ", block, re.MULTILINE)
+            )
         )
 
-        if result.returncode == 0:
-            print(f"  ✓ [patch:{source}] Applied patch via git apply")
-            return True
+    # --- Attempt 1: git apply from repo root ---
+    if _looks_like_unified_diff(normalized_patch):
+        print(f"  [patch:{source}] Trying git apply in {repo_path}")
 
-        print(f"  ⚠ [patch:{source}] git apply failed (exit {result.returncode}); marking as patch_error")
-        if result.stdout.strip():
-            print("  [git apply stdout]", result.stdout.strip())
-        if result.stderr.strip():
-            # Log only the first few lines to keep output readable.
-            stderr_lines = result.stderr.strip().splitlines()
-            head = stderr_lines[:5]
-            print("  [git apply stderr]", "\n    ".join(head))
+        # Write the patch exactly as received to a temporary file.
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False, encoding="utf-8") as f:
+            f.write(normalized_patch)
+            patch_file = f.name
 
-        # If fallback is disabled, we stop here.
-        if os.getenv("TG_SWE_ENABLE_PATCH_FALLBACK", "0") != "1":
-            print(f"  ⚠ [patch:{source}] Fallback disabled; treating as unpatchable patch")
-            return False
-
-        # --- Optional Attempt 2: explicit file rewrite format ---
-        print(f"  [patch:{source}] Falling back to file rewrite mode")
-        lines: List[str] = patch_text.strip().splitlines()
-        file_pattern = re.compile(r"^(?:file:|#|//)\s*([^\s]+\.py)", re.IGNORECASE)
-
-        current_file: Optional[str] = None
-        file_content: List[str] = []
-        files_written = 0
-
-        for line in lines:
-            m = file_pattern.match(line)
-            if m:
-                # Flush previous file if we have one
-                if current_file and file_content:
-                    full_path = repo_path / current_file
-                    full_path.parent.mkdir(parents=True, exist_ok=True)
-                    full_path.write_text("\n".join(file_content), encoding="utf-8")
-                    print(f"  ✓ [patch:{source}] Wrote {current_file}")
-                    files_written += 1
-
-                # Start a new file block
-                current_file = m.group(1)
-                file_content = []
-            else:
-                file_content.append(line)
-
-        # Flush final file
-        if current_file and file_content:
-            full_path = repo_path / current_file
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text("\n".join(file_content), encoding="utf-8")
-            print(f"  ✓ [patch:{source}] Wrote {current_file}")
-            files_written += 1
-
-        if files_written == 0:
-            print(f"  ⚠ [patch:{source}] Could not parse fallback patch format; no files written")
-            return False
-
-        return True
-
-    finally:
         try:
-            os.unlink(patch_file)
-        except OSError:
-            pass
+            result = subprocess.run(
+                ["git", "apply", patch_file],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode == 0:
+                print(f"  ✓ [patch:{source}] Applied patch via git apply")
+                return True
+
+            print(f"  ⚠ [patch:{source}] git apply failed (exit {result.returncode}); marking as patch_error")
+            if result.stdout.strip():
+                print("  [git apply stdout]", result.stdout.strip())
+            if result.stderr.strip():
+                # Log only the first few lines to keep output readable.
+                stderr_lines = result.stderr.strip().splitlines()
+                head = stderr_lines[:5]
+                print("  [git apply stderr]", "\n    ".join(head))
+        except FileNotFoundError:
+            print("  ⚠ git is not available on this system; skipping git apply")
+        except Exception as e:
+            print(f"  ⚠ Unexpected error during git apply: {e}")
+        finally:
+            try:
+                os.unlink(patch_file)
+            except OSError:
+                pass
+    else:
+        print(
+            f"  ⚠ [patch:{source}] Patch text does not look like a unified diff; "
+            "skipping git apply"
+        )
+
+    # If fallback is disabled, we stop here.
+    if os.getenv("TG_SWE_ENABLE_PATCH_FALLBACK", "0") != "1":
+        print(f"  ⚠ [patch:{source}] Fallback disabled; treating as unpatchable patch")
+        return False
+
+    # --- Optional Attempt 2: explicit file rewrite format ---
+    print(f"  [patch:{source}] Falling back to file rewrite mode")
+    lines: List[str] = normalized_patch.splitlines()
+    file_pattern = re.compile(r"^(?:file:|#|//)\s*([^\s]+\.py)", re.IGNORECASE)
+
+    current_file: Optional[str] = None
+    file_content: List[str] = []
+    files_written = 0
+
+    for line in lines:
+        m = file_pattern.match(line)
+        if m:
+            # Flush previous file if we have one
+            if current_file and file_content:
+                full_path = repo_path / current_file
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text("\n".join(file_content), encoding="utf-8")
+                print(f"  ✓ [patch:{source}] Wrote {current_file}")
+                files_written += 1
+
+            # Start a new file block
+            current_file = m.group(1)
+            file_content = []
+        else:
+            file_content.append(line)
+
+    # Flush final file
+    if current_file and file_content:
+        full_path = repo_path / current_file
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_text("\n".join(file_content), encoding="utf-8")
+        print(f"  ✓ [patch:{source}] Wrote {current_file}")
+        files_written += 1
+
+    if files_written == 0:
+        print(f"  ⚠ [patch:{source}] Could not parse fallback patch format; no files written")
+        return False
+
+    return True
+
+
 def get_repo_structure(repo_path: Path, max_depth: int = 3, max_lines: int = 50) -> str:
     """Return a small directory tree for fallback context."""
 
