@@ -72,7 +72,9 @@ class SweConfig:
 
 
 
-def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "model") -> bool:
+def apply_model_patch_to_repo(
+    task: SweTask, patch_text: str, source: str = "model"
+) -> bool:
     """Apply a patch to task.repo_path.
 
     This is used for model-generated patches today, and can also be used
@@ -112,37 +114,55 @@ def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "mod
             )
         )
 
-    # --- Attempt 1: git apply from repo root ---
-    if _looks_like_unified_diff(normalized_patch):
-        print(f"  [patch:{source}] Trying git apply in {repo_path}")
+    def _apply_with_strategy(strategy: str, patch_file: str) -> Tuple[bool, str]:
+        if strategy == "default":
+            cmd = ["git", "apply", "--check", patch_file]
+            result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
+            if result.returncode == 0:
+                subprocess.run(["git", "apply", patch_file], cwd=repo_path, check=True)
+                return True, "Applied successfully (default)"
+            return False, result.stderr or result.stdout or "git apply failed"
 
-        # Write the patch exactly as received to a temporary file.
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False, encoding="utf-8") as f:
+        if strategy == "3way":
+            cmd = ["git", "apply", "--3way", patch_file]
+            result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
+            if result.returncode == 0:
+                return True, "Applied successfully (3way)"
+            return False, result.stderr or result.stdout or "git apply --3way failed"
+
+        if strategy == "reject":
+            cmd = ["git", "apply", "--reject", patch_file]
+            result = subprocess.run(cmd, cwd=repo_path, capture_output=True, text=True)
+            if result.returncode == 0:
+                rej_files = list(repo_path.rglob("*.rej"))
+                if rej_files:
+                    return False, f"Partial apply with {len(rej_files)} rejects"
+                return True, "Applied successfully (reject mode)"
+            return False, result.stderr or result.stdout or "git apply --reject failed"
+
+        return False, "Unknown strategy"
+
+    # --- Attempt 1: git apply with retries ---
+    if _looks_like_unified_diff(normalized_patch):
+        print(f"  [patch:{source}] Trying git apply strategies in {repo_path}")
+
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".patch", delete=False, encoding="utf-8"
+        ) as f:
             f.write(normalized_patch)
             patch_file = f.name
 
         try:
-            result = subprocess.run(
-                ["git", "apply", patch_file],
-                cwd=repo_path,
-                capture_output=True,
-                text=True,
-            )
-
-            if result.returncode == 0:
-                print(f"  ✓ [patch:{source}] Applied patch via git apply")
-                return True
-
-            print(f"  ⚠ [patch:{source}] git apply failed (exit {result.returncode}); marking as patch_error")
-            if result.stdout.strip():
-                print("  [git apply stdout]", result.stdout.strip())
-            if result.stderr.strip():
-                # Log only the first few lines to keep output readable.
-                stderr_lines = result.stderr.strip().splitlines()
-                head = stderr_lines[:5]
-                print("  [git apply stderr]", "\n    ".join(head))
+            for strategy in ("default", "3way", "reject"):
+                ok, message = _apply_with_strategy(strategy, patch_file)
+                if ok:
+                    print(f"  ✓ [patch:{source}] {message}")
+                    return True
+                print(f"  ⚠ [patch:{source}] {message}")
         except FileNotFoundError:
             print("  ⚠ git is not available on this system; skipping git apply")
+        except subprocess.CalledProcessError as exc:
+            print(f"  ⚠ git apply raised error: {exc}")
         except Exception as e:
             print(f"  ⚠ Unexpected error during git apply: {e}")
         finally:
@@ -173,7 +193,6 @@ def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "mod
     for line in lines:
         m = file_pattern.match(line)
         if m:
-            # Flush previous file if we have one
             if current_file and file_content:
                 full_path = repo_path / current_file
                 full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -181,13 +200,11 @@ def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "mod
                 print(f"  ✓ [patch:{source}] Wrote {current_file}")
                 files_written += 1
 
-            # Start a new file block
             current_file = m.group(1)
             file_content = []
         else:
             file_content.append(line)
 
-    # Flush final file
     if current_file and file_content:
         full_path = repo_path / current_file
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -196,7 +213,9 @@ def apply_model_patch_to_repo(task: SweTask, patch_text: str, source: str = "mod
         files_written += 1
 
     if files_written == 0:
-        print(f"  ⚠ [patch:{source}] Could not parse fallback patch format; no files written")
+        print(
+            f"  ⚠ [patch:{source}] Could not parse fallback patch format; no files written"
+        )
         return False
 
     return True

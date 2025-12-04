@@ -189,15 +189,11 @@ def call_model_for_code(model_name: str, prompt: str, temperature: float = 0.0, 
 
 
 def extract_code_from_response(text: str) -> str:
-    """Extract code or patch text from an LLM response.
+    """Extract code or patch text from an LLM response with validation.
 
-    Preference order (to reduce the chance of feeding prose to git apply):
-      1. A fenced code block labeled ````diff`` or ````patch``.
-      2. Any fenced block that contains ``diff --git`` or unified diff markers.
-      3. A raw unified diff starting with ``diff --git`` (unfenced).
-      4. The first fenced block (language-agnostic) as a backward-compatible
-         fallback for the non-SWE tasks.
-      5. Otherwise return an empty string so callers can gracefully skip.
+    The function prefers properly fenced diff blocks, validates unified diff
+    structure, and uses non-greedy extraction to avoid trailing prose being fed
+    into ``git apply``.
     """
 
     if not text:
@@ -207,14 +203,24 @@ def extract_code_from_response(text: str) -> str:
         return block if block.endswith("\n") else block + "\n"
 
     def _looks_like_unified_diff(block: str) -> bool:
-        return bool(
-            re.search(r"^diff --git", block, re.MULTILINE)
-            or re.search(r"^@@", block, re.MULTILINE)
-            or (
-                re.search(r"^--- ", block, re.MULTILINE)
-                and re.search(r"^\+\+\+ ", block, re.MULTILINE)
-            )
+        has_diff_header = bool(re.search(r"^diff --git", block, re.MULTILINE))
+        has_hunk_header = bool(
+            re.search(r"^@@ -\d+,\d+ \+\d+,\d+ @@", block, re.MULTILINE)
         )
+        has_file_markers = bool(
+            re.search(r"^--- ", block, re.MULTILINE)
+            and re.search(r"^\+\+\+ ", block, re.MULTILINE)
+        )
+        return has_diff_header or (has_hunk_header and has_file_markers)
+
+    def _validate_unified_diff(block: str) -> bool:
+        lines = block.splitlines()
+        has_header = any(l.startswith("diff --git") for l in lines)
+        has_files = any(l.startswith("---") for l in lines) and any(
+            l.startswith("+++") for l in lines
+        )
+        has_hunk = any(re.match(r"^@@ -\d+,\d+ \+\d+,\d+ @@", l) for l in lines)
+        return has_hunk and (has_header or has_files)
 
     fenced_re = re.compile(r"```(?P<lang>[\w+-]*)\n(?P<body>.*?)```", re.DOTALL)
 
@@ -223,29 +229,46 @@ def extract_code_from_response(text: str) -> str:
         lang = m.group("lang").strip().lower()
         body = m.group("body").strip()
         if lang in {"diff", "patch"}:
-            return _ensure_trailing_newline(body)
+            if _validate_unified_diff(body):
+                return _ensure_trailing_newline(body)
+            print("[WARN] Found ```diff``` block but validation failed; skipping")
 
     # 2) Any fenced block that looks like a diff
     for m in fenced_re.finditer(text):
         body = m.group("body").strip()
-        if _looks_like_unified_diff(body):
+        if _looks_like_unified_diff(body) and _validate_unified_diff(body):
             return _ensure_trailing_newline(body)
 
-    # 3) Raw unified diff in the response
-    raw_diff = re.search(r"(diff --git[\s\S]*)", text, re.MULTILINE)
+    # 3) Raw unified diff in the response (non-greedy to avoid trailing prose)
+    raw_diff = re.search(r"(diff --git[\s\S]*?)(?=\n\n[A-Z]|\n\n```|\Z)", text, re.MULTILINE)
     if raw_diff:
         body = raw_diff.group(1).strip()
-        if body:
+        if _validate_unified_diff(body):
             return _ensure_trailing_newline(body)
 
     # 4) Backward-compatible: return first fenced block (any language)
     first_fence = fenced_re.search(text)
     if first_fence:
         body = first_fence.group("body").strip()
-        return _ensure_trailing_newline(body)
+        lines = body.splitlines()
+        if lines and re.match(r"^[a-zA-Z0-9_+\-]+$", lines[0].strip()):
+            body = "\n".join(lines[1:]).strip()
+        if body:
+            return _ensure_trailing_newline(body)
 
-    # 5) Nothing useful detected
-    return ""
+    # 5) Marker-based extraction for legacy responses
+    markers = [
+        r"(?:here(?:'s| is) the (?:complete |final )?(?:code|implementation|solution):?\s*\n)(.*)",
+    ]
+    for pattern in markers:
+        m = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        if m:
+            body = m.group(1).strip()
+            if body:
+                return _ensure_trailing_newline(body)
+
+    # 6) Last resort: return cleaned response text
+    return _ensure_trailing_newline(text.strip())
 
 
 def parse_pytest_output(output: str) -> Tuple[int, int]:
