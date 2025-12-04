@@ -1,6 +1,7 @@
 pytest
 ruff
 openai>=1.0.0
+pyyaml
 
 matplotlib
 
