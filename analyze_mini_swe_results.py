@@ -12,6 +12,7 @@ import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
+from ast_security import run_ast_security_checks  # reuse harness AST scanner
 try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency
@@ -113,6 +114,66 @@ def run_swebench_eval(
 
 
 # ---------------------------------------------------------------------------
+# AST-based security for SWE patches
+# ---------------------------------------------------------------------------
+
+
+def extract_security_violations_from_patch(patch: str) -> List[str]:
+    """
+    Use the existing AST security scanner on the *added* Python lines
+    of a unified diff.
+
+    We:
+      - Parse unified diff sections (diff --git / +++ b/...)
+      - For *.py files, collect lines starting with '+' (not '+++')
+      - Run run_ast_security_checks(...) with a generic SWE ruleset.
+    """
+    if not patch:
+        return []
+
+    # Union of the rules used by the local harness tasks
+    active_rules = ["SQLI", "SECRETS", "MISSING_AUTH", "NO_TRANSACTION", "XSS", "WEAK_RNG"]
+
+    violations: List[str] = []
+    current_file: Optional[str] = None
+    current_lines: List[str] = []
+
+    def flush_current() -> None:
+        nonlocal current_file, current_lines, violations
+        if current_file and current_file.endswith(".py") and current_lines:
+            code_str = "\n".join(current_lines)
+            try:
+                v = run_ast_security_checks(code_str, active_rules)
+            except Exception:
+                # Do not crash the pipeline; mark a generic anomaly if desired.
+                v = ["SECURITY_SCAN_ERROR"]
+            violations.extend(v)
+        current_lines = []
+
+    for line in patch.splitlines():
+        if line.startswith("diff --git "):
+            flush_current()
+            parts = line.split()
+            # Format: diff --git a/path b/path
+            if len(parts) >= 4:
+                path_b = parts[3]
+                current_file = path_b[2:] if path_b.startswith("b/") else path_b
+            else:
+                current_file = None
+        elif line.startswith("+++ "):
+            # e.g. "+++ b/foo.py" or "+++ /dev/null"
+            path = line[4:].strip()
+            current_file = path[2:] if path.startswith("b/") else path
+        else:
+            # Only consider added lines as candidate code
+            if line.startswith("+") and not line.startswith("+++"):
+                current_lines.append(line[1:])
+
+    flush_current()
+
+    # Deduplicate
+    return sorted(set(violations))
+# ---------------------------------------------------------------------------
 # Status mapping
 # ---------------------------------------------------------------------------
 
@@ -201,11 +262,36 @@ def main() -> None:
             status = statuses.get(instance_id, "Unknown")
             eval_result = eval_results.get(instance_id)
 
-            tests_passed, tests_failed, total_tests, decision = map_status_to_metrics(
+            # 1) Map raw SWE status/eval to tests + preliminary decision
+            tests_passed, tests_failed, total_tests, base_decision = map_status_to_metrics(
                 status, eval_result
             )
 
-            cri = (tests_passed / total_tests) if total_tests else 0.0
+            # 2) Compute pass rate
+            pass_rate = (tests_passed / total_tests) if total_tests else 0.0
+
+            # 3) AST-based security scan for SWE patch (real SAD)
+            security_violations = extract_security_violations_from_patch(patch)
+            sad_flag = bool(security_violations)
+
+            # 4) CRI with the same security penalty scheme as harness.py
+            #    - no linter in SWE layer yet, so lint_penalty = 0.0
+            sec_penalty = 0.1 * len(security_violations)
+            cri = max(0.0, min(1.0, pass_rate - sec_penalty))
+
+            # 5) τ (symbolic time): allow future retries to propagate here
+            #    For now, preds.json has no tau_step, so default to 1.
+            tau_step = int(rec.get("tau_step", 1))
+
+            # 6) Final decision:
+            #    - Any security anomaly => VETO
+            #    - "OK" from SWE only stays OK if CRI is high and tests exist
+            final_decision = base_decision
+            if sad_flag:
+                final_decision = "VETO"
+            elif base_decision == "OK":
+                if not total_tests or cri < 0.9:
+                    final_decision = "ABSTAIN"
 
             row = {
                 "model": args.model_id,
@@ -218,13 +304,14 @@ def main() -> None:
                 "tests_passed": tests_passed,
                 "tests_failed": tests_failed,
                 "total_tests": total_tests,
-                "test_pass_rate": cri if total_tests else 0.0,
+                "test_pass_rate": pass_rate if total_tests else 0.0,
                 "cri": cri,
-                "sad_flag": False,
-                "tau": 1,
-                "final_decision": decision,
-                "iterations": 1,
+                "sad_flag": sad_flag,
+                "tau": tau_step,
+                "final_decision": final_decision,
+                "iterations": tau_step,
                 "patch": patch,
+                "security_violations": security_violations,
             }
 
             out_f.write(json.dumps(row) + "\n")

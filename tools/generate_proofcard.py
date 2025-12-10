@@ -1,26 +1,8 @@
 #!/usr/bin/env python3
-"""
-tools/generate_proofcard.py
+"""tools/generate_proofcard.py
 
 Generate a τGuardian ProofCard JSON from an enriched JSONL file.
-
-Usage:
-    python tools/generate_proofcard.py \n        --enriched-path swe_qwen3_coder_run01.enriched.jsonl \n        --out-dir proofcards/run_001 \n        [--instance-id some_task_id] \n        [--sign-key path/to/key.bin]
-
-The script:
-- Reads the enriched JSONL file (one record per line).
-- If --instance-id is provided, uses the record whose instance_id matches.
-- Otherwise, uses the FIRST non-empty record.
-- Computes a SHA-256 hash over the canonical JSON of the payload.
-- Optionally computes an HMAC-SHA256 signature using --sign-key.
-
-Key file format (for --sign-key):
-- Arbitrary binary file used as the HMAC key.
-- Recommended: 32 bytes of random data, e.g.:
-      dd if=/dev/urandom of=keys/prod_key.bin bs=32 count=1
-- The raw bytes of the file are used directly as the HMAC key.
 """
-
 from __future__ import annotations
 
 import argparse
@@ -31,9 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-
 def _canonical_json_bytes(obj: Any) -> bytes:
-    """Deterministic JSON encoding: sorted keys, compact separators, UTF-8."""
     return json.dumps(
         obj,
         sort_keys=True,
@@ -41,20 +21,7 @@ def _canonical_json_bytes(obj: Any) -> bytes:
         ensure_ascii=False,
     ).encode("utf-8")
 
-
-def _load_record(
-    enriched_path: Path,
-    instance_id: Optional[str],
-) -> Dict[str, Any]:
-    """
-    Load a record from a JSONL file.
-
-    If instance_id is None:
-        - Returns the first non-empty JSON object.
-    If instance_id is provided:
-        - Returns the first record whose "instance_id" equals that value.
-    Raises ValueError if no matching record is found.
-    """
+def _load_record(enriched_path: Path, instance_id: Optional[str]) -> Dict[str, Any]:
     if not enriched_path.exists():
         raise FileNotFoundError(f"enriched-path not found: {enriched_path}")
 
@@ -75,14 +42,7 @@ def _load_record(
         f"No record found for instance_id={instance_id!r} in {enriched_path}"
     )
 
-
 def _compute_patch_hash(record: Dict[str, Any]) -> Optional[str]:
-    """
-    Compute SHA-256 hash of the 'patch' field if present.
-
-    Returns:
-        Hex digest string, or None if patch is missing/empty.
-    """
     patch = record.get("patch")
     if not patch:
         return None
@@ -90,19 +50,10 @@ def _compute_patch_hash(record: Dict[str, Any]) -> Optional[str]:
         patch = str(patch)
     return hashlib.sha256(patch.encode("utf-8")).hexdigest()
 
-
 def _compute_hmac_signature(payload_bytes: bytes, key_path: Path) -> str:
-    """
-    Compute HMAC-SHA256 of payload_bytes using the raw contents of key_path.
-
-    Key format:
-        - Raw binary file used as the HMAC key.
-        - Recommended: 32 random bytes (but any length works).
-    """
     key = key_path.read_bytes()
     sig = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
     return sig
-
 
 def generate_proofcard(
     enriched_path: Path,
@@ -110,25 +61,6 @@ def generate_proofcard(
     instance_id: Optional[str] = None,
     sign_key_path: Optional[Path] = None,
 ) -> Path:
-    """
-    Generate a single ProofCard.json from a record in enriched_path.
-
-    Fields included (where available in the enriched record):
-        - proofcard_id (UUID-like string)
-        - run_id
-        - instance_id
-        - model
-        - timestamp (UTC ISO8601)
-        - patch_hash (SHA-256 of 'patch', if present)
-        - tests: {passed, failed, total}
-        - cri
-        - sad_flag
-        - tau
-        - decision / final_decision
-        - source_enriched_path
-        - payload_hash (SHA-256 of canonical payload)
-        - signature (HMAC-SHA256 if sign_key_path is provided)
-    """
     import uuid
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -172,12 +104,10 @@ def generate_proofcard(
         "source_enriched_path": str(enriched_path),
     }
 
-    # Deterministic hash of payload (without signature)
     payload_bytes = _canonical_json_bytes(payload)
     payload_hash = hashlib.sha256(payload_bytes).hexdigest()
     payload["payload_hash"] = payload_hash
 
-    # Optional HMAC signature
     if sign_key_path is not None:
         if not sign_key_path.exists():
             raise FileNotFoundError(f"sign-key not found: {sign_key_path}")
@@ -196,7 +126,6 @@ def generate_proofcard(
 
     print(f"[generate_proofcard] Wrote ProofCard to {out_path}")
     return out_path
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -235,7 +164,6 @@ def main() -> None:
         instance_id=instance_id,
         sign_key_path=sign_key_path,
     )
-
 
 if __name__ == "__main__":
     main()
