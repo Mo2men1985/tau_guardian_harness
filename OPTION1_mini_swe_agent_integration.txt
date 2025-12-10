@@ -1,0 +1,16 @@
+Option 1: Use official mini-SWE-agent + Gemini 2.5 Pro for SWE-bench
+
+This repository keeps τGuardian's own SWE harness small and provider-agnostic.
+For Gemini 2.5 Pro / Gemini 3 Pro SWE-bench runs that match the public leaderboard,
+you should:
+
+1) Install mini-SWE-agent and follow its SWE-bench quickstart.
+2) Configure Gemini via LiteLLM or the recommended provider config.
+3) Run their official SWE-bench command (bash-only or full, as desired).
+4) Save their predictions/results JSONL for later analysis.
+5) Use τGuardian's analysis scripts to compute CRI/SAD/τ-style metrics
+   on those runs, or to compare against τGuardian's internal harness.
+
+No extra Python dependencies are added here; Option 1 is intentionally
+implemented as an external pipeline so that the core harness + tests
+(`pytest -q`) continue to run in a lightweight virtualenv.
