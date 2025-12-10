@@ -391,8 +391,10 @@ def aggregate_checks(task: Task) -> CheckResults:
 
 def compute_metrics(checks: CheckResults, tau_step: int) -> Metrics:
     if checks.total_tests > 0:
-        pass_rate = (checks.total_tests - checks.tests_failed) / checks.total_tests
+        tests_passed = checks.total_tests - checks.tests_failed
+        pass_rate = tests_passed / checks.total_tests
     else:
+        tests_passed = 0
         pass_rate = 0.0
 
     sec_penalty = 0.1 * len(checks.security_violations)
@@ -403,11 +405,19 @@ def compute_metrics(checks: CheckResults, tau_step: int) -> Metrics:
     return Metrics(cri=cri, sad_flag=sad_flag, tau=tau_step)
 
 
-def decide(metrics: Metrics, checks: CheckResults, cri_ok_threshold: float = 0.9) -> Decision:
+def decide(
+    metrics: Metrics,
+    checks: CheckResults,
+    tau_step: int,
+    tau_max: int,
+    cri_ok_threshold: float = 0.9,
+) -> Decision:
     if metrics.sad_flag:
         return "VETO"
     if metrics.cri >= cri_ok_threshold and checks.tests_failed == 0:
         return "OK"
+    if tau_step < tau_max:
+        return "ABSTAIN"
     return "ABSTAIN"
 
 
@@ -485,7 +495,13 @@ def run_wrapped(
 
         checks = aggregate_checks(task)
         metrics = compute_metrics(checks, tau_step=tau_step)
-        decision = decide(metrics, checks, cri_ok_threshold=cri_ok_threshold)
+        decision = decide(
+            metrics,
+            checks,
+            tau_step=tau_step,
+            tau_max=tau_max,
+            cri_ok_threshold=cri_ok_threshold,
+        )
 
         iterations.append(
             IterationRecord(
