@@ -1,13 +1,12 @@
-
 """
 llm_client.py
 
-Provider-agnostic client abstraction for τGuardian runtime harness.
+Provider-agnostic client abstraction for τGuardian.
 
 This module defines:
   - LLMConfig: normalized configuration for a model call.
   - LLMClient protocol: interface used by τGuardian.
-  - Concrete provider clients: OpenAIClient, GeminiClient, FakeClient.
+  - Concrete provider clients: OpenAIClient, GeminiClient, FakeClient, LocalGemmaClient.
   - Factory helpers: get_client(), generate_code(), generate_code_from_env().
 """
 
@@ -17,7 +16,64 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol, runtime_checkable, Literal, Tuple
 import os
 
-ProviderName = Literal["openai", "gemini", "fake"]
+try:
+    import torch  # type: ignore
+    from transformers import AutoTokenizer, AutoModelForCausalLM  # type: ignore
+except Exception:  # transformers is optional for non-local providers
+    torch = None
+    AutoTokenizer = None
+    AutoModelForCausalLM = None
+
+# -----------------------------------------------------------------------------
+# Local Gemma 3n singleton (loaded once per process)
+# -----------------------------------------------------------------------------
+_LOCAL_GEMMA_MODEL = None
+_LOCAL_GEMMA_TOKENIZER = None
+
+
+def _load_local_gemma_model(model_path: str):
+    """
+    Lazily load Gemma 3n from a local HF directory.
+
+    Expects `config`, `tokenizer_config`, and safetensors shards under model_path.
+    """
+    global _LOCAL_GEMMA_MODEL, _LOCAL_GEMMA_TOKENIZER
+
+    if _LOCAL_GEMMA_MODEL is not None and _LOCAL_GEMMA_TOKENIZER is not None:
+        return _LOCAL_GEMMA_MODEL, _LOCAL_GEMMA_TOKENIZER
+
+    if torch is None or AutoTokenizer is None or AutoModelForCausalLM is None:
+        raise RuntimeError(
+            "Local Gemma requested but transformers/torch are not installed. "
+            "Install with: pip install 'torch>=2.3.0' 'transformers>=4.53.0' accelerate safetensors"
+        )
+
+    # Prefer GPU if available; otherwise float16 on CPU to reduce RAM.
+    if torch.cuda.is_available():
+        dtype = torch.bfloat16
+        device_map = "auto"
+    else:
+        dtype = torch.float16
+        device_map = "cpu"
+
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_path,
+        trust_remote_code=True,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        dtype=dtype,
+        device_map=device_map,
+        low_cpu_mem_usage=True,
+    )
+    model.eval()
+
+    _LOCAL_GEMMA_MODEL = model
+    _LOCAL_GEMMA_TOKENIZER = tokenizer
+    return model, tokenizer
+
+
+ProviderName = Literal["openai", "gemini", "fake", "local_gemma"]
 
 
 @dataclass(frozen=True)
@@ -109,27 +165,38 @@ class GeminiClient:
         self._genai = genai
 
     def generate(self, prompt: str, **_: Any) -> str:
-        model = self._genai.GenerativeModel(self.config.model)
-        response = model.generate_content(
-            prompt,
-            generation_config={
-                "temperature": self.config.temperature,
-                "max_output_tokens": self.config.max_tokens,
-            },
-        )
+        """Generate text from Gemini.
 
-        # Guard against safety blocks / no Part cases where response.text raises
-        # a ValueError. We try response.text first, then aggregate candidate parts.
-        text = None
+        This version is defensive:
+        - If the API raises, we return a debug string describing the error.
+        - If the response has no text/parts, we also return a debug string
+          instead of a silent empty string, so the harness logs are informative.
+        """
         try:
-            text = response.text  # type: ignore[attr-defined]
+            model = self._genai.GenerativeModel(self.config.model)
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    "temperature": self.config.temperature,
+                    "max_output_tokens": self.config.max_tokens,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - network / quota issues
+            # Surface the error as text so _tg_logs/*.txt captures it.
+            return f"[TGEMINI_ERROR] {type(exc).__name__}: {exc!r}"
+
+        # Try the standard quick accessor first.
+        text: Optional[str] = None
+        try:
+            text = getattr(response, "text", None)  # type: ignore[attr-defined]
         except Exception:
             text = None
 
-        if text:
+        if text and text.strip():
             return text
 
-        parts = []
+        # Fallback: aggregate any candidate.parts[].text
+        parts: list[str] = []
         for cand in getattr(response, "candidates", []) or []:
             content = getattr(cand, "content", None)
             if not content:
@@ -142,9 +209,88 @@ class GeminiClient:
         if parts:
             return "\n".join(parts)
 
-        # Last resort: empty string so the harness treats it as a failed
-        # generation instead of crashing.
-        return ""
+        # Final fallback: emit a debug marker so we can see what happened.
+        debug_fragments = ["[TGEMINI_EMPTY_RESPONSE]"]
+        for attr in ("prompt_feedback", "finish_reason", "safety_ratings"):
+            val = getattr(response, attr, None)
+            if val is not None:
+                debug_fragments.append(f"{attr}={val!r}")
+        return "\n".join(debug_fragments)
+
+
+class LocalGemmaClient:
+    """
+    Local Gemma 3n client using Hugging Face transformers.
+
+    Activated with:
+        LLM_PROVIDER=local_gemma
+        GEMMA_MODEL_PATH=<local snapshot dir>
+
+    Respects:
+        LLM_MAX_TOKENS         -> max_new_tokens
+        GEMMA_MAX_PROMPT_CHARS -> prompt truncation (chars; keep tail)
+        LOCAL_GEMMA_FAST       -> if "1", return a stub response (no heavy compute)
+    """
+
+    def __init__(self, config: LLMConfig) -> None:
+        self.config = config
+        model_path = os.getenv("GEMMA_MODEL_PATH", "").strip()
+        if not model_path:
+            raise LLMError(
+                "GEMMA_MODEL_PATH is not set. Please point it at your local Gemma 3n "
+                "snapshot directory (the folder containing config + safetensors)."
+            )
+        self.model, self.tokenizer = _load_local_gemma_model(model_path)
+
+    def generate(self, prompt: str, **_: Any) -> str:
+        if torch is None:
+            raise LLMError("torch is required for LocalGemmaClient but is not available.")
+
+        # Optional ultra-fast stub to smoke-test τGuardian without heavy compute.
+        if os.getenv("LOCAL_GEMMA_FAST", "0") == "1":
+            print("[LocalGemma] LOCAL_GEMMA_FAST=1 -> returning stub response.")
+            return "def handler(request):\n    return {'status': 200}\n"
+
+        # 1) Truncate very long prompts for CPU safety.
+        max_chars_env = os.getenv("GEMMA_MAX_PROMPT_CHARS", "4000")
+        try:
+            max_chars = int(max_chars_env)
+        except ValueError:
+            max_chars = 4000
+
+        if len(prompt) > max_chars:
+            # Keep the tail (usually contains failing tests + latest code).
+            prompt = prompt[-max_chars:]
+
+        # Small debug line so you can see effective prompt + generation settings.
+        print(
+            f"[LocalGemma] Prompt length: {len(prompt)} chars, "
+            f"max_new_tokens={self.config.max_tokens}"
+        )
+
+        # 2) Tokenize & move to model device.
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+
+        # 3) Build generation kwargs.
+        gen_kwargs: Dict[str, Any] = {
+            "max_new_tokens": self.config.max_tokens,
+            "pad_token_id": self.tokenizer.eos_token_id,
+        }
+
+        # Use deterministic decoding by default; sample only if temperature > 0.
+        if self.config.temperature > 0.0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = max(self.config.temperature, 0.1)
+        else:
+            gen_kwargs["do_sample"] = False
+
+        # 4) Generate.
+        with torch.no_grad():
+            outputs = self.model.generate(**inputs, **gen_kwargs)
+
+        # 5) Decode.
+        return self.tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
 class FakeClient:
@@ -172,6 +318,8 @@ def _make_client(config: LLMConfig) -> LLMClient:
         return OpenAIClient(config)
     if config.provider == "gemini":
         return GeminiClient(config)
+    if config.provider == "local_gemma":
+        return LocalGemmaClient(config)
     raise LLMError(f"Unsupported provider: {config.provider}")
 
 
@@ -188,6 +336,8 @@ def config_from_env(model_name: Optional[str] = None) -> LLMConfig:
         provider: ProviderName = "gemini"
     elif provider_str == "fake":
         provider = "fake"
+    elif provider_str == "local_gemma":
+        provider = "local_gemma"
     else:
         provider = "openai"
 
