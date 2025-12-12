@@ -9,10 +9,71 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, Mapping, Optional
+
+
+def normalize_patch_text(text: str) -> str:
+    """Normalize model patch text into a clean unified diff string.
+
+    Steps:
+    - Strip leading/trailing whitespace and remove markdown-style fences
+      (```diff/```patch/```).
+    - Extract the first contiguous unified diff block, preferring ``diff --git``
+      headers, otherwise starting at the first ``--- `` followed by ``+++ ``.
+    - Drop any leading prose before the diff block.
+    - Ensure the patch ends with a trailing newline.
+    - If no diff-looking content is found, return the original text with a
+      trailing newline.
+    """
+
+    if text is None:
+        text = ""
+
+    raw = text.strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:diff|patch)?\s*\n?", "", raw, count=1)
+        raw = re.sub(r"\n?```\s*$", "", raw, count=1)
+
+    lines = raw.splitlines()
+
+    def _slice_from(idx: int) -> List[str]:
+        block: List[str] = []
+        for i, line in enumerate(lines[idx:], start=idx):
+            if line.strip().startswith("```"):
+                break
+            if i > idx and line.startswith("diff --git "):
+                break
+            block.append(line)
+        return block
+
+    block: Optional[List[str]] = None
+    for i, line in enumerate(lines):
+        if line.startswith("diff --git "):
+            block = _slice_from(i)
+            break
+
+    if block is None:
+        for i, line in enumerate(lines):
+            if line.startswith("--- "):
+                # Ensure a +++ follows to avoid capturing prose that happens to
+                # contain '--- ' sequences.
+                if any(l.startswith("+++ ") for l in lines[i + 1 :]):
+                    block = _slice_from(i)
+                    break
+
+    if block:
+        normalized = "\n".join(block)
+    else:
+        normalized = raw
+
+    if not normalized.endswith("\n"):
+        normalized += "\n"
+
+    return normalized
 
 
 def _ensure_instance_id(record: Dict[str, Any], fallback: str) -> Dict[str, Any]:
@@ -35,7 +96,7 @@ def _ensure_instance_id(record: Dict[str, Any], fallback: str) -> Dict[str, Any]
     return out
 
 
-def _normalize_prediction_mapping(mapping: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _normalize_prediction_mapping(mapping: Mapping[str, Any]) -> List[Dict[str, Any]]:
     """Handle ``{instance_id: payload}`` style predictions."""
 
     normalized: List[Dict[str, Any]] = []
@@ -88,17 +149,23 @@ def load_predictions(predictions_path: Path) -> List[Dict[str, Any]]:
 
     try:
         parsed = json.loads(raw_text)
-        return _normalize_prediction_obj(parsed)
+        raw_preds = _normalize_prediction_obj(parsed)
     except json.JSONDecodeError:
-        pass
+        raw_preds = []
+        for idx, line in enumerate(raw_text.splitlines(), start=1):
+            ln = line.strip()
+            if not ln:
+                continue
+            obj = json.loads(ln)
+            raw_preds.extend(
+                _normalize_prediction_obj(obj or {"instance_id": f"line_{idx}"})
+            )
 
     preds: List[Dict[str, Any]] = []
-    for idx, line in enumerate(raw_text.splitlines(), start=1):
-        ln = line.strip()
-        if not ln:
-            continue
-        obj = json.loads(ln)
-        preds.extend(_normalize_prediction_obj(obj or {"instance_id": f"line_{idx}"}))
+    for rec in raw_preds:
+        rec_copy = dict(rec)
+        rec_copy["model_patch"] = normalize_patch_text(rec_copy.get("model_patch", ""))
+        preds.append(rec_copy)
     return preds
 
 
@@ -145,49 +212,136 @@ def _find_report(outdir: Path, run_id: str) -> Path:
     return candidates[0]
 
 
-def _extract_instance_records(report_data: Any) -> List[Dict[str, Any]]:
+def _extract_report_instances(report_data: Any) -> Dict[str, Dict[str, Any]]:
+    def _attach(inst_id: Optional[str], payload: Mapping[str, Any]) -> None:
+        if inst_id:
+            instances[str(inst_id)] = dict(payload)
+
+    instances: Dict[str, Dict[str, Any]] = {}
     if isinstance(report_data, dict):
-        if "instances" in report_data and isinstance(report_data["instances"], list):
-            return [dict(rec) for rec in report_data["instances"]]
-        if "results" in report_data and isinstance(report_data["results"], list):
-            return [dict(rec) for rec in report_data["results"]]
-        if "instance_id" in report_data:
-            return [dict(report_data)]
-    if isinstance(report_data, list):
-        return [dict(rec) if isinstance(rec, dict) else {"instance_id": str(rec)} for rec in report_data]
-    return []
+        for key in ("report", "results", "instances"):
+            section = report_data.get(key)
+            if isinstance(section, dict):
+                for inst_id, payload in section.items():
+                    if isinstance(payload, Mapping):
+                        _attach(inst_id, payload)
+            elif isinstance(section, list):
+                for payload in section:
+                    if isinstance(payload, Mapping):
+                        inst_id = (
+                            payload.get("instance_id")
+                            or payload.get("task")
+                            or payload.get("id")
+                            or payload.get("task_id")
+                        )
+                        _attach(inst_id, payload)
+        if not instances and "instance_id" in report_data:
+            _attach(report_data.get("instance_id"), report_data)
+    elif isinstance(report_data, list):
+        for payload in report_data:
+            if isinstance(payload, Mapping):
+                inst_id = (
+                    payload.get("instance_id")
+                    or payload.get("task")
+                    or payload.get("id")
+                    or payload.get("task_id")
+                )
+                _attach(inst_id, payload)
+    return instances
 
 
-def _build_instance_results(report_path: Path, outdir: Path) -> Path:
-    with report_path.open("r", encoding="utf-8") as fh:
-        report_data = json.load(fh)
+def _resolve_from_report(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    resolved = bool(payload.get("resolved", False))
+    patch_applied = payload.get("patch_successfully_applied")
+    if patch_applied is False:
+        return {"resolved": False, "resolved_status": "PATCH_APPLY_FAILED"}
+    return {"resolved": resolved, "resolved_status": "RESOLVED" if resolved else "UNRESOLVED"}
 
-    instance_records = _extract_instance_records(report_data)
-    if not instance_records:
-        raise RuntimeError(f"No instance records found in report {report_path}")
+
+def _parse_run_instance_log(log_path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        text = log_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    failure_markers = (
+        "Patch Apply Failed",
+        "Only garbage was found in the patch input",
+        "patch unexpectedly ends in middle of line",
+    )
+    if any(marker in text for marker in failure_markers):
+        return {"resolved": False, "resolved_status": "PATCH_APPLY_FAILED"}
+
+    m = re.search(r"resolved:\s*(True|False)", text)
+    if m:
+        resolved_flag = m.group(1) == "True"
+        return {
+            "resolved": resolved_flag,
+            "resolved_status": "RESOLVED" if resolved_flag else "UNRESOLVED",
+        }
+
+    return None
+
+
+def _find_run_instance_log(outdir: Path, run_id: str, instance_id: str) -> Optional[Path]:
+    base = outdir / "logs" / "run_evaluation"
+    if (base / run_id).exists():
+        base = base / run_id
+    pattern = f"**/{instance_id}/run_instance.log"
+    matches = list(base.glob(pattern)) if base.exists() else []
+    if matches:
+        return sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)[0]
+    return None
+
+
+def _build_instance_results(
+    predictions: Iterable[Mapping[str, Any]],
+    report_path: Optional[Path],
+    outdir: Path,
+    run_id: str,
+) -> Path:
+    report_instances: Dict[str, Dict[str, Any]] = {}
+    if report_path and report_path.exists():
+        try:
+            with report_path.open("r", encoding="utf-8") as fh:
+                report_data = json.load(fh)
+            report_instances = _extract_report_instances(report_data)
+        except Exception as exc:  # pragma: no cover - defensive
+            print(f"[tg_swebench_cli] WARN: Failed to parse report {report_path}: {exc}")
 
     out_path = outdir / "instance_results.jsonl"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    written = 0
     with out_path.open("w", encoding="utf-8") as fh:
-        for rec in instance_records:
-            instance_id = rec.get("instance_id") or rec.get("task") or rec.get("id")
-            resolved_bool = rec.get("resolved")
-            resolved_status = rec.get("resolved_status") or rec.get("status")
-            if resolved_status is None and isinstance(resolved_bool, bool):
-                resolved_status = "resolved" if resolved_bool else "unresolved"
+        for pred in predictions:
+            instance_id = str(pred.get("instance_id"))
+            payload: Optional[Mapping[str, Any]] = report_instances.get(instance_id)
+            result: Optional[Dict[str, Any]] = None
+
+            if payload:
+                result = _resolve_from_report(payload)
+            if result is None:
+                log_path = _find_run_instance_log(outdir, run_id, instance_id)
+                if log_path:
+                    result = _parse_run_instance_log(log_path)
+
+            if result is None:
+                result = {"resolved": False, "resolved_status": "UNRESOLVED"}
+
             fh.write(
                 json.dumps(
                     {
                         "instance_id": instance_id,
-                        "resolved": bool(resolved_bool) if resolved_bool is not None else None,
-                        "resolved_status": resolved_status,
+                        "resolved": bool(result.get("resolved", False)),
+                        "resolved_status": result.get("resolved_status", "UNRESOLVED"),
                     }
                 )
                 + "\n"
             )
+            written += 1
 
-    print(f"[tg_swebench_cli] Wrote {len(instance_records)} rows to {out_path}")
+    print(f"[tg_swebench_cli] Wrote {written} rows to {out_path}")
     return out_path
 
 
@@ -219,8 +373,13 @@ def main() -> None:
         split=args.split,
     )
 
-    report = _find_report(outdir, args.run_id)
-    _build_instance_results(report, outdir)
+    try:
+        report = _find_report(outdir, args.run_id)
+    except FileNotFoundError as exc:
+        print(f"[tg_swebench_cli] WARN: {exc}")
+        report = None
+
+    _build_instance_results(predictions, report, outdir, args.run_id)
 
 
 if __name__ == "__main__":

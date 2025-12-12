@@ -11,9 +11,10 @@ import glob
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from ast_security import run_ast_security_checks  # reuse harness AST scanner
+from tg_swebench_cli import normalize_patch_text
 try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency
@@ -27,6 +28,83 @@ try:  # pragma: no cover - heavy optional dependency
 except Exception:  # pragma: no cover
     run_evaluation = None  # type: ignore[assignment]
     SWEBENCH_AVAILABLE = False
+
+
+# ---------------------------------------------------------------------------
+# Prediction loading helpers
+# ---------------------------------------------------------------------------
+
+
+def _ensure_instance_id(record: Dict[str, Any], fallback: str) -> Dict[str, Any]:
+    out = dict(record)
+    instance_id = (
+        out.get("instance_id")
+        or out.get("task")
+        or out.get("id")
+        or out.get("task_id")
+        or fallback
+    )
+    out["instance_id"] = instance_id
+    return out
+
+
+def _normalize_prediction_mapping(mapping: Dict[str, Any]) -> List[Dict[str, Any]]:
+    normalized: List[Dict[str, Any]] = []
+    for instance_id, payload in mapping.items():
+        if isinstance(payload, dict):
+            rec = dict(payload)
+        else:
+            rec = {"model_patch": payload}
+        rec.setdefault("instance_id", instance_id)
+        normalized.append(rec)
+    return normalized
+
+
+def _normalize_prediction_obj(obj: Any) -> List[Dict[str, Any]]:
+    if obj is None:
+        return []
+    if isinstance(obj, list):
+        result: List[Dict[str, Any]] = []
+        for idx, rec in enumerate(obj, start=1):
+            if not isinstance(rec, dict):
+                rec = {"model_patch": rec}
+            result.append(_ensure_instance_id(rec, f"instance_{idx}"))
+        return result
+    if isinstance(obj, dict):
+        if any(k in obj for k in ("instance_id", "task", "id", "task_id")):
+            return [_ensure_instance_id(dict(obj), "instance_unknown")]
+        return _normalize_prediction_mapping(obj)
+    return [_ensure_instance_id({"model_patch": obj}, "instance_unknown")]
+
+
+def load_predictions(preds_path: Path) -> List[Dict[str, Any]]:
+    if not preds_path.exists():
+        raise SystemExit(f"[ERROR] preds.json not found at {preds_path}")
+
+    raw_text = preds_path.read_text(encoding="utf-8-sig")
+    if not raw_text.strip():
+        return []
+
+    try:
+        parsed = json.loads(raw_text)
+        raw_preds = _normalize_prediction_obj(parsed)
+    except json.JSONDecodeError:
+        raw_preds = []
+        for idx, line in enumerate(raw_text.splitlines(), start=1):
+            ln = line.strip()
+            if not ln:
+                continue
+            obj = json.loads(ln)
+            raw_preds.extend(
+                _normalize_prediction_obj(obj or {"instance_id": f"line_{idx}"})
+            )
+
+    preds: List[Dict[str, Any]] = []
+    for rec in raw_preds:
+        rec_copy = dict(rec)
+        rec_copy["model_patch"] = normalize_patch_text(rec_copy.get("model_patch", ""))
+        preds.append(_ensure_instance_id(rec_copy, f"instance_{len(preds)+1}"))
+    return preds
 
 
 # ---------------------------------------------------------------------------
@@ -262,25 +340,56 @@ def apply_instance_eval(
     if not instance_eval:
         return base_row
 
-    resolved_status = normalize_resolved_status(
-        instance_eval.get("resolved_status"), instance_eval.get("resolved")
-    )
-    base_row["eval_status"] = resolved_status
+    resolved_raw = instance_eval.get("resolved")
+    resolved_status_raw = instance_eval.get("resolved_status")
+    resolved_status = None
+    if isinstance(resolved_status_raw, str):
+        resolved_status = resolved_status_raw.strip().upper()
+    elif resolved_status_raw is not None:
+        resolved_status = str(resolved_status_raw).upper()
 
-    if resolved_status is None:
+    resolved: Optional[bool]
+    if isinstance(resolved_raw, bool):
+        resolved = resolved_raw
+    elif resolved_status is not None:
+        resolved = resolved_status == "RESOLVED"
+    else:
+        resolved = None
+
+    if resolved is False and resolved_status is None:
+        resolved_status = "UNRESOLVED"
+
+    eval_status: Optional[str] = None
+    if resolved is True:
+        eval_status = "resolved"
+    elif resolved_status == "UNRESOLVED":
+        eval_status = "unresolved"
+    elif resolved_status == "PATCH_APPLY_FAILED":
+        eval_status = "error"
+
+    base_row.update(
+        {
+            "resolved": resolved,
+            "resolved_status": resolved_status,
+            "eval_status": eval_status,
+        }
+    )
+
+    if eval_status is None:
         return base_row
 
-    if resolved_status == "resolved":
+    if resolved:
         tests_passed, tests_failed = 1, 0
-        final_decision = "OK" if not sad_flag else "ABSTAIN"
+        total_tests = 1
+        test_pass_rate = 1.0
         cri = 1.0
+        final_decision = "VETO" if sad_flag else "OK"
     else:
         tests_passed, tests_failed = 0, 1
+        total_tests = 1
+        test_pass_rate = 0.0
         final_decision = "ABSTAIN"
         cri = 0.0
-
-    total_tests = tests_passed + tests_failed
-    test_pass_rate = tests_passed / total_tests if total_tests else 0.0
 
     base_row.update(
         {
@@ -312,24 +421,13 @@ def build_eval_records(
     """Generate the τGuardian eval JSONL for a mini-SWE run."""
 
     preds_path = msa_dir / "preds.json"
-    if not preds_path.exists():
-        raise SystemExit(f"[ERROR] preds.json not found at {preds_path}")
-
-    with preds_path.open("r", encoding="utf-8") as f:
-        preds = json.load(f)
-
-    if not isinstance(preds, dict):
-        raise SystemExit("[ERROR] preds.json must be a mapping of instance_id -> record")
+    predictions = load_predictions(preds_path)
 
     statuses = load_statuses(str(msa_dir))
     instance_results = load_instance_results(instance_results_path)
 
     eval_results: Dict[str, Dict[str, Any]] = {}
     if run_eval:
-        predictions = [
-            {"instance_id": iid, "model_patch": rec.get("model_patch", "")}
-            for iid, rec in preds.items()
-        ]
         eval_results = run_swebench_eval(
             predictions,
             dataset_name=dataset,
@@ -340,32 +438,26 @@ def build_eval_records(
     success = 0
 
     with output_path.open("w", encoding="utf-8") as out_f:
-        for instance_id, rec in preds.items():
+        for rec in predictions:
+            instance_id = str(rec.get("instance_id"))
             patch = rec.get("model_patch", "")
             status = statuses.get(instance_id, "Unknown")
             eval_result = eval_results.get(instance_id)
 
-            # 1) Map raw SWE status/eval to tests + preliminary decision
             tests_passed, tests_failed, total_tests, base_decision = map_status_to_metrics(
                 status, eval_result
             )
 
-            # 2) Compute pass rate
             pass_rate = (tests_passed / total_tests) if total_tests else 0.0
 
-            # 3) AST-based security scan for SWE patch (real SAD)
             security_violations = extract_security_violations_from_patch(patch)
             sad_flag = bool(security_violations)
 
-            # 4) CRI with the same security penalty scheme as harness.py
             sec_penalty = 0.1 * len(security_violations)
-            cri = max(0.0, min(1.0, pass_rate - sec_penalty))
+            cri = max(0.0, min(1.0, pass_rate - sec_penalty)) if total_tests else 0.0
 
-            # 5) τ (symbolic time): allow future retries to propagate here
-            #    For now, preds.json has no tau_step, so default to 1.
             tau_step = int(rec.get("tau_step", 1))
 
-            # 6) Final decision
             final_decision = base_decision
             if sad_flag:
                 final_decision = "VETO"
@@ -380,7 +472,9 @@ def build_eval_records(
                 "type": "external_swe_agent",
                 "source": "mini-swe-agent",
                 "status": status,
-                "eval_status": eval_result.get("resolved") if eval_result else None,
+                "resolved": None,
+                "resolved_status": None,
+                "eval_status": None,
                 "tests_passed": tests_passed,
                 "tests_failed": tests_failed,
                 "total_tests": total_tests,
@@ -399,7 +493,7 @@ def build_eval_records(
             out_f.write(json.dumps(row) + "\n")
 
             total += 1
-            if row.get("tests_passed", 0) > 0:
+            if row.get("final_decision") == "OK":
                 success += 1
 
     return total, success
@@ -446,7 +540,7 @@ def main() -> None:
     else:
         rate = success / total if total else 0.0
         print(f"[INFO] Wrote {total} records to {output_path}")
-        print(f"[INFO] Success: {success}/{total} ({rate:.1%})")
+        print(f"[INFO] OK decisions: {success}/{total} ({rate:.1%})")
         if args.run_eval:
             print("[INFO] Ground-truth evaluation completed via swebench")
 
