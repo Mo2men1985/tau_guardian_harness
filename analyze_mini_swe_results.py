@@ -272,8 +272,9 @@ def apply_instance_eval(
 
     if resolved_status == "resolved":
         tests_passed, tests_failed = 1, 0
-        final_decision = "OK" if not sad_flag else "ABSTAIN"
         cri = 1.0
+        # SAD always dominates even when SWE-bench marks the instance resolved.
+        final_decision = "VETO" if sad_flag else "OK"
     else:
         tests_passed, tests_failed = 0, 1
         final_decision = "ABSTAIN"
