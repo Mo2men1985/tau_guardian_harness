@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import json.decoder
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ast_security import run_ast_security_checks  # reuse harness AST scanner
@@ -84,6 +86,102 @@ def load_statuses(msa_dir: str) -> Dict[str, str]:
 
     print(f"[INFO] Loaded {len(status_map)} statuses from {len(paths)} files")
     return status_map
+
+
+# ---------------------------------------------------------------------------
+# Prediction loading
+# ---------------------------------------------------------------------------
+
+
+def _ensure_instance_id(record: Dict[str, Any], fallback: str) -> Dict[str, Any]:
+    """Return a copy of ``record`` with a best-effort ``instance_id``.
+
+    mini-SWE outputs sometimes omit ``instance_id`` and instead expose fields like
+    ``task`` or ``id``. We normalize that here so downstream logic always has a
+    stable key.
+    """
+
+    out = dict(record)
+    instance_id = (
+        out.get("instance_id")
+        or out.get("task")
+        or out.get("id")
+        or out.get("task_id")
+        or fallback
+    )
+    out["instance_id"] = instance_id
+    return out
+
+
+def _normalize_prediction_obj(obj: Any, fallback_prefix: str = "instance") -> List[Dict[str, Any]]:
+    """Normalize a single JSON object into a list of prediction dicts."""
+
+    if obj is None:
+        return []
+
+    if isinstance(obj, list):
+        normalized: List[Dict[str, Any]] = []
+        for idx, rec in enumerate(obj, start=1):
+            if not isinstance(rec, dict):
+                rec = {"model_patch": rec}
+            normalized.append(_ensure_instance_id(rec, f"{fallback_prefix}_{idx}"))
+        return normalized
+
+    if isinstance(obj, dict):
+        if any(k in obj for k in ("instance_id", "task", "id", "task_id")):
+            return [_ensure_instance_id(dict(obj), f"{fallback_prefix}_1")]
+
+        normalized: List[Dict[str, Any]] = []
+        for instance_id, payload in obj.items():
+            if isinstance(payload, dict):
+                rec = dict(payload)
+            else:
+                rec = {"model_patch": payload}
+            rec.setdefault("instance_id", instance_id)
+            normalized.append(rec)
+        return normalized
+
+    return [_ensure_instance_id({"model_patch": obj}, f"{fallback_prefix}_1")]
+
+
+def load_preds(preds_path: Path) -> Dict[str, Dict[str, Any]]:
+    """Load mini-SWE predictions from JSON or JSONL formats.
+
+    Supported shapes:
+    - Mapping of ``instance_id -> record`` (canonical)
+    - JSON array of records
+    - JSON Lines file (one JSON object per line)
+
+    Returns a mapping ``instance_id -> record`` for internal consumption.
+    """
+
+    if not preds_path.exists():
+        raise SystemExit(f"[ERROR] preds.json not found at {preds_path}")
+
+    raw_text = preds_path.read_text(encoding="utf-8-sig")
+    if not raw_text.strip():
+        return {}
+
+    try:
+        parsed = json.loads(raw_text)
+        candidates = _normalize_prediction_obj(parsed, fallback_prefix="pred")
+    except json.decoder.JSONDecodeError:
+        candidates = []
+        for idx, line in enumerate(raw_text.splitlines(), start=1):
+            ln = line.strip()
+            if not ln:
+                continue
+            obj = json.loads(ln)
+            candidates.extend(_normalize_prediction_obj(obj, fallback_prefix=f"line{idx}"))
+
+    normalized: Dict[str, Dict[str, Any]] = {}
+    for rec in candidates:
+        instance_id = rec.get("instance_id")
+        if not instance_id:
+            continue
+        normalized[str(instance_id)] = rec
+
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +271,26 @@ def extract_security_violations_from_patch(patch: str) -> List[str]:
 
     # Deduplicate
     return sorted(set(violations))
+
+
 # ---------------------------------------------------------------------------
-# Status mapping
+# Status mapping helpers
 # ---------------------------------------------------------------------------
+
+
+def normalize_resolved_status(resolved_status: Any, resolved_flag: Any) -> Optional[str]:
+    """Normalize SWE-bench resolved status to a canonical string."""
+
+    if isinstance(resolved_status, str) and resolved_status.strip():
+        status_norm = resolved_status.strip().lower()
+        if status_norm in {"resolved", "pass", "passed"}:
+            return "resolved"
+        return "unresolved"
+
+    if isinstance(resolved_flag, bool):
+        return "resolved" if resolved_flag else "unresolved"
+
+    return None
 
 
 def map_status_to_metrics(
@@ -207,56 +322,114 @@ def map_status_to_metrics(
     return 0, 1, 1, "ABSTAIN"
 
 
+def load_instance_results(path: Optional[Path]) -> Dict[str, Dict[str, Any]]:
+    """Load instance_results.jsonl into a mapping."""
+
+    if path is None:
+        return {}
+
+    if not path.exists():
+        raise FileNotFoundError(f"instance_results file not found: {path}")
+
+    results: Dict[str, Dict[str, Any]] = {}
+    with path.open("r", encoding="utf-8") as fh:
+        for ln in fh:
+            ln = ln.strip()
+            if not ln:
+                continue
+            obj = json.loads(ln)
+            instance_id = obj.get("instance_id")
+            if instance_id:
+                results[str(instance_id)] = obj
+    print(f"[INFO] Loaded {len(results)} instance results from {path}")
+    return results
+
+
+def apply_instance_eval(
+    base_row: Dict[str, Any],
+    instance_eval: Optional[Dict[str, Any]],
+    sad_flag: bool,
+) -> Dict[str, Any]:
+    """Merge SWE-bench instance results onto the base SWE row.
+
+    The SWE-bench resolved state is the source of truth for eval_status,
+    tests, CRI, and final_decision when available.
+    """
+
+    if not instance_eval:
+        return base_row
+
+    resolved_status = normalize_resolved_status(
+        instance_eval.get("resolved_status"), instance_eval.get("resolved")
+    )
+    base_row["eval_status"] = resolved_status
+
+    if resolved_status is None:
+        return base_row
+
+    if resolved_status == "resolved":
+        tests_passed, tests_failed = 1, 0
+        final_decision = "OK" if not sad_flag else "ABSTAIN"
+        cri = 1.0
+    else:
+        tests_passed, tests_failed = 0, 1
+        final_decision = "ABSTAIN"
+        cri = 0.0
+
+    total_tests = tests_passed + tests_failed
+    test_pass_rate = tests_passed / total_tests if total_tests else 0.0
+
+    base_row.update(
+        {
+            "tests_passed": tests_passed,
+            "tests_failed": tests_failed,
+            "total_tests": total_tests,
+            "test_pass_rate": test_pass_rate,
+            "cri": cri,
+            "final_decision": final_decision,
+        }
+    )
+    return base_row
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Convert mini-SWE-agent results to τGuardian JSONL, optionally running SWE-bench evaluation.",
-    )
-    parser.add_argument("--msa-dir", default="msa_outputs", help="mini-SWE-agent output directory")
-    parser.add_argument("--model-id", default="mini-swe-agent", help="Logical model identifier")
-    parser.add_argument("--output", default="swe_results.jsonl", help="Output JSONL path")
-    parser.add_argument(
-        "--run-eval", action="store_true", help="Run SWE-bench evaluation harness if installed"
-    )
-    parser.add_argument(
-        "--dataset", default="princeton-nlp/SWE-bench_Lite", help="SWE-bench dataset name for evaluation"
-    )
-    parser.add_argument("--timeout", type=int, default=300, help="Timeout per instance for evaluation (seconds)")
+def build_eval_records(
+    msa_dir: Path,
+    model_id: str,
+    output_path: Path,
+    instance_results_path: Optional[Path] = None,
+    run_eval: bool = False,
+    dataset: str = "princeton-nlp/SWE-bench_Lite",
+    timeout: int = 300,
+) -> Tuple[int, int]:
+    """Generate the τGuardian eval JSONL for a mini-SWE run."""
 
-    args = parser.parse_args()
+    preds_path = msa_dir / "preds.json"
+    preds = load_preds(preds_path)
 
-    preds_path = os.path.join(args.msa_dir, "preds.json")
-    if not os.path.exists(preds_path):
-        raise SystemExit(f"[ERROR] preds.json not found at {preds_path}")
-
-    with open(preds_path, "r", encoding="utf-8") as f:
-        preds = json.load(f)
-
-    if not isinstance(preds, dict):
-        raise SystemExit("[ERROR] preds.json must be a mapping of instance_id -> record")
-
-    statuses = load_statuses(args.msa_dir)
+    statuses = load_statuses(str(msa_dir))
+    instance_results = load_instance_results(instance_results_path)
 
     eval_results: Dict[str, Dict[str, Any]] = {}
-    if args.run_eval:
+    if run_eval:
         predictions = [
             {"instance_id": iid, "model_patch": rec.get("model_patch", "")}
             for iid, rec in preds.items()
         ]
         eval_results = run_swebench_eval(
             predictions,
-            dataset_name=args.dataset,
-            timeout=args.timeout,
+            dataset_name=dataset,
+            timeout=timeout,
         )
 
     total = 0
     success = 0
 
-    with open(args.output, "w", encoding="utf-8") as out_f:
+    with output_path.open("w", encoding="utf-8") as out_f:
         for instance_id, rec in preds.items():
             patch = rec.get("model_patch", "")
             status = statuses.get(instance_id, "Unknown")
@@ -275,7 +448,6 @@ def main() -> None:
             sad_flag = bool(security_violations)
 
             # 4) CRI with the same security penalty scheme as harness.py
-            #    - no linter in SWE layer yet, so lint_penalty = 0.0
             sec_penalty = 0.1 * len(security_violations)
             cri = max(0.0, min(1.0, pass_rate - sec_penalty))
 
@@ -283,9 +455,7 @@ def main() -> None:
             #    For now, preds.json has no tau_step, so default to 1.
             tau_step = int(rec.get("tau_step", 1))
 
-            # 6) Final decision:
-            #    - Any security anomaly => VETO
-            #    - "OK" from SWE only stays OK if CRI is high and tests exist
+            # 6) Final decision
             final_decision = base_decision
             if sad_flag:
                 final_decision = "VETO"
@@ -293,14 +463,19 @@ def main() -> None:
                 if not total_tests or cri < 0.9:
                     final_decision = "ABSTAIN"
 
-            row = {
-                "model": args.model_id,
+            resolved_status = normalize_resolved_status(
+                eval_result.get("resolved_status") if eval_result else None,
+                eval_result.get("resolved") if eval_result else None,
+            )
+
+            row: Dict[str, Any] = {
+                "model": model_id,
                 "provider": rec.get("provider", "unknown"),
                 "task": instance_id,
                 "type": "external_swe_agent",
                 "source": "mini-swe-agent",
                 "status": status,
-                "eval_status": eval_result.get("resolved") if eval_result else None,
+                "eval_status": resolved_status,
                 "tests_passed": tests_passed,
                 "tests_failed": tests_failed,
                 "total_tests": total_tests,
@@ -314,20 +489,61 @@ def main() -> None:
                 "security_violations": security_violations,
             }
 
+            row = apply_instance_eval(row, instance_results.get(instance_id), sad_flag)
+
             out_f.write(json.dumps(row) + "\n")
 
             total += 1
-            if tests_passed > 0:
+            if row.get("tests_passed", 0) > 0:
                 success += 1
 
+    return total, success
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Convert mini-SWE-agent results to τGuardian JSONL, optionally running SWE-bench evaluation.",
+    )
+    parser.add_argument("--msa-dir", default="msa_outputs", help="mini-SWE-agent output directory")
+    parser.add_argument("--model-id", default="mini-swe-agent", help="Logical model identifier")
+    parser.add_argument("--output", default="swe_results.jsonl", help="Output JSONL path")
+    parser.add_argument(
+        "--run-eval", action="store_true", help="Run SWE-bench evaluation harness if installed"
+    )
+    parser.add_argument(
+        "--dataset", default="princeton-nlp/SWE-bench_Lite", help="SWE-bench dataset name for evaluation"
+    )
+    parser.add_argument("--timeout", type=int, default=300, help="Timeout per instance for evaluation (seconds)")
+    parser.add_argument(
+        "--instance-results",
+        default=None,
+        help="Path to instance_results.jsonl produced by SWE-bench harness",
+    )
+
+    args = parser.parse_args()
+
+    instance_results_path = Path(args.instance_results).expanduser() if args.instance_results else None
+    msa_dir = Path(args.msa_dir)
+    output_path = Path(args.output)
+
+    total, success = build_eval_records(
+        msa_dir=msa_dir,
+        model_id=args.model_id,
+        output_path=output_path,
+        instance_results_path=instance_results_path,
+        run_eval=args.run_eval,
+        dataset=args.dataset,
+        timeout=args.timeout,
+    )
+
     if total == 0:
-        print(f"[INFO] No predictions found in {preds_path}")
+        print(f"[INFO] No predictions found in {msa_dir / 'preds.json'}")
     else:
         rate = success / total if total else 0.0
-        print(f"[INFO] Wrote {total} records to {args.output}")
+        print(f"[INFO] Wrote {total} records to {output_path}")
         print(f"[INFO] Success: {success}/{total} ({rate:.1%})")
         if args.run_eval:
-            print(f"[INFO] Ground-truth evaluation completed for {len(eval_results)} instances")
+            print("[INFO] Ground-truth evaluation completed via swebench")
 
 
 if __name__ == "__main__":
