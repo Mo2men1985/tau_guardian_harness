@@ -368,13 +368,19 @@ def apply_instance_eval(
         return base_row
 
     if resolved_status == "resolved":
+        # Ground truth: tests really passed
         tests_passed, tests_failed = 1, 0
-        final_decision = "OK" if not sad_flag else "ABSTAIN"
         cri = 1.0
+
+        # Preserve veto on security anomaly
+        if sad_flag:
+            final_decision = "VETO"
+        else:
+            final_decision = "OK"
     else:
         tests_passed, tests_failed = 0, 1
-        final_decision = "ABSTAIN"
         cri = 0.0
+        final_decision = "ABSTAIN"
 
     total_tests = tests_passed + tests_failed
     test_pass_rate = tests_passed / total_tests if total_tests else 0.0
