@@ -47,6 +47,45 @@ You can add new tasks by extending `example_tasks()` and providing:
 - Tests in `tests/`
 - Security rules in the `Task` definition.
 
+## SWE-bench / mini-SWE integration quickstart
+
+Use the SWE-bench wrappers to evaluate mini-SWE agent outputs and emit
+τGuardian-compatible eval JSONL files:
+
+1. **Run the SWE-bench harness** while normalizing predictions and writing
+   `instance_results.jsonl` under your output directory:
+
+   ```bash
+   python tg_swebench_cli.py \
+     --predictions-path msa_run/preds.json \
+     --run-id my_run_id \
+     --outdir msa_run
+   ```
+
+2. **Orchestration wrapper** (honors `TG_SWE_EVAL_CLI` if set) that ensures the
+   harness runs and `instance_results.jsonl` exists:
+
+   ```bash
+   python swe_eval_wrapper.py \
+     --predictions-path msa_run/preds.json \
+     --run-id my_run_id \
+     --outdir msa_run
+   ```
+
+3. **Post-process mini-SWE outputs** by merging ground-truth results into
+   τGuardian eval rows:
+
+   ```bash
+   python analyze_mini_swe_results.py \
+     --msa-dir msa_run \
+     --model-id dashscope/qwen3-coder-480b-a35b-instruct \
+     --instance-results msa_run/instance_results.jsonl \
+     --output swe_eval.jsonl
+   ```
+
+The resulting `swe_eval.jsonl` contains per-instance `eval_status`, test metrics,
+CRI, and final decisions aligned with SWE-bench ground truth.
+
 
 ## Security model
 
