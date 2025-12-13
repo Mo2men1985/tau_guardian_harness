@@ -6,7 +6,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
-from analyze_mini_swe_results import build_eval_records
+from analyze_mini_swe_results import build_eval_records, extract_security_violations_from_patch
 
 
 def _write_exit_status(msa_dir: Path, instance_ids: list[str], status: str) -> None:
@@ -129,4 +129,69 @@ def test_resolved_instance_with_sad_is_veto(tmp_path: Path) -> None:
     assert rows[0]["eval_status"] == "resolved"
     assert rows[0]["cri"] == 1.0
     assert rows[0]["sad_flag"] is True
+    assert rows[0]["security_scan_failed"] is False
     assert rows[0]["final_decision"] == "VETO"
+
+
+def test_diff_fragment_wrapping_prevents_false_sad() -> None:
+    patch = """
+    diff --git a/foo.py b/foo.py
+    index 000000..111111 100644
+    --- a/foo.py
+    +++ b/foo.py
+    @@
+    +    value = 1 + 1
+    +    return value
+    """
+
+    violations, scan_failed = extract_security_violations_from_patch(patch)
+
+    assert violations == []
+    assert scan_failed is False
+
+
+def test_resolved_instance_with_scan_failed_abstains(tmp_path: Path) -> None:
+    msa_dir = tmp_path / "msa"
+    msa_dir.mkdir()
+
+    patch = """
+    diff --git a/file.py b/file.py
+    --- a/file.py
+    +++ b/file.py
+    @@
+    +def broken(:
+    +    pass
+    """
+    preds = [{"instance_id": "demo__proj-scanfail", "model_patch": patch}]
+    (msa_dir / "preds.json").write_text(json.dumps(preds), encoding="utf-8")
+    _write_exit_status(msa_dir, ["demo__proj-scanfail"], "Submitted")
+
+    instance_results = tmp_path / "instance_results.jsonl"
+    instance_results.write_text(
+        json.dumps(
+            {
+                "instance_id": "demo__proj-scanfail",
+                "resolved": True,
+                "resolved_status": "RESOLVED",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    output_path = tmp_path / "eval.jsonl"
+    total, success = build_eval_records(
+        msa_dir=msa_dir,
+        model_id="demo-model",
+        output_path=output_path,
+        instance_results_path=instance_results,
+    )
+
+    assert total == 1
+    assert success == 0
+
+    row = json.loads(output_path.read_text(encoding="utf-8").splitlines()[0])
+    assert row["resolved"] is True
+    assert row["sad_flag"] is False
+    assert row["security_scan_failed"] is True
+    assert row["final_decision"] == "ABSTAIN"

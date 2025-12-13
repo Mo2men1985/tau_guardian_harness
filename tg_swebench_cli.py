@@ -34,6 +34,9 @@ def normalize_patch_text(text: str) -> str:
     if text is None:
         text = ""
 
+    # Normalize newlines early to avoid CRLF-related patch apply failures.
+    text = text.replace("\r\n", "\n")
+
     raw = text.strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:diff|patch)?\s*\n?", "", raw, count=1)

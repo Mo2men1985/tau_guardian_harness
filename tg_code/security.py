@@ -36,6 +36,7 @@ DEFAULT_RULE_IDS: Sequence[str] = (
 @dataclass
 class SecurityScanResult:
     violations: List[str]
+    scan_failed: bool = False
 
     @property
     def sad_flag(self) -> bool:
@@ -100,8 +101,18 @@ def scan_code_for_violations(
     active_rules: Optional[Iterable[str]] = None,
     verbose: bool = False,
 ) -> SecurityScanResult:
+    scan_failed = False
     violations = _call_ast_scanner(code_str, active_rules=active_rules)
+
+    error_markers = {"SYNTAX_ERROR_PREVENTS_SECURITY_SCAN", "SECURITY_SCAN_ERROR"}
+    if violations:
+        if any(v in error_markers for v in violations):
+            filtered = [v for v in violations if v not in error_markers]
+            scan_failed = scan_failed or bool(filtered != violations)
+            violations = filtered if filtered else None
+
     if violations is None:
+        scan_failed = True
         if verbose:
             warnings.warn(
                 "AST security scanner unavailable or failed; using fallback heuristic.",
@@ -109,7 +120,7 @@ def scan_code_for_violations(
             )
         violations = _fallback_scan(code_str, active_rules=active_rules)
 
-    return SecurityScanResult(violations=list(violations))
+    return SecurityScanResult(violations=list(violations), scan_failed=scan_failed)
 
 def scan_file_for_violations(
     path: Path | str,
