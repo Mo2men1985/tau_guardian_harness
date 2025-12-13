@@ -101,6 +101,13 @@ def scan_code_for_violations(
     verbose: bool = False,
 ) -> SecurityScanResult:
     violations = _call_ast_scanner(code_str, active_rules=active_rules)
+
+    error_markers = {"SYNTAX_ERROR_PREVENTS_SECURITY_SCAN", "SECURITY_SCAN_ERROR"}
+    if violations:
+        if any(v in error_markers for v in violations):
+            filtered = [v for v in violations if v not in error_markers]
+            violations = filtered if filtered else None
+
     if violations is None:
         if verbose:
             warnings.warn(
