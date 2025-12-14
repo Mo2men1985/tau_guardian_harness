@@ -429,6 +429,7 @@ def build_eval_records(
     run_eval: bool = False,
     dataset: str = "princeton-nlp/SWE-bench_Lite",
     timeout: int = 300,
+    security_reports_dir: Optional[Path] = None,
 ) -> Tuple[int, int]:
     """Generate the τGuardian eval JSONL for a mini-SWE run."""
 
@@ -465,11 +466,35 @@ def build_eval_records(
             pass_rate = (tests_passed / total_tests) if total_tests else 0.0
 
             # 3) AST-based security scan for SWE patch (real SAD)
-            security_violations, security_scan_failed = extract_security_violations_from_patch(
-                patch
-            )
-            sad_flag = bool(security_violations)
+            security_report_found = False
+            security_scan_scope = "diff_fragment_fallback_v2"
 
+            if security_reports_dir is not None:
+                report_path = security_reports_dir / f"{instance_id}.json"
+                if report_path.exists():
+                    security_report_found = True
+                    try:
+                        report = json.loads(report_path.read_text(encoding="utf-8"))
+                        security_scan_scope = str(
+                            report.get("scan_scope", "postapply_fullfile_delta_v1")
+                        )
+                        security_scan_failed = bool(report.get("scan_failed", False))
+                        security_violations = report.get("new_violations") or []
+                    except Exception:
+                        security_scan_scope = "postapply_fullfile_delta_v1"
+                        security_scan_failed = True
+                        security_violations = []
+                else:
+                    security_violations, security_scan_failed = (
+                        extract_security_violations_from_patch(patch)
+                    )
+            else:
+                security_violations, security_scan_failed = (
+                    extract_security_violations_from_patch(patch)
+                )
+
+            sad_flag = bool(security_violations)
+            
             # 4) CRI with the same security penalty scheme as harness.py
             sec_penalty = 0.1 * len(security_violations)
             cri = max(0.0, min(1.0, pass_rate - sec_penalty)) if total_tests else 0.0
@@ -507,6 +532,8 @@ def build_eval_records(
                 "cri": cri,
                 "sad_flag": sad_flag,
                 "security_scan_failed": security_scan_failed,
+                "security_scan_scope": security_scan_scope,
+                "security_report_found": security_report_found,
                 "tau": tau_step,
                 "final_decision": final_decision,
                 "iterations": tau_step,
@@ -546,12 +573,21 @@ def main() -> None:
         default=None,
         help="Path to instance_results.jsonl produced by SWE-bench harness",
     )
+    parser.add_argument(
+        "--security-reports-dir",
+        default=None,
+        help="Directory containing post-apply security reports (security_reports/<id>.json)",
+    )
 
     args = parser.parse_args()
 
     instance_results_path = Path(args.instance_results).expanduser() if args.instance_results else None
     msa_dir = Path(args.msa_dir)
     output_path = Path(args.output)
+
+    security_reports_dir = (
+        Path(args.security_reports_dir).expanduser() if args.security_reports_dir else None
+    )
 
     total, success = build_eval_records(
         msa_dir=msa_dir,
@@ -561,6 +597,7 @@ def main() -> None:
         run_eval=args.run_eval,
         dataset=args.dataset,
         timeout=args.timeout,
+        security_reports_dir=security_reports_dir,
     )
 
     if total == 0:
