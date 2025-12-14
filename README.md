@@ -137,6 +137,9 @@ with any LLM configured via `llm_client.py`. For Gemini 2.5 Pro / Gemini 3 Pro b
 a practical path is to re-use the official **mini-SWE-agent** pipeline and treat τGuardian as an extra
 metrics layer around its results.
 
+See `docs/POSTAPPLY_SECURITY_SCAN.md` for the authoritative post-apply security
+scan workflow that stabilizes SAD decisions on SWE-bench outputs.
+
 This repository does **not** vendor mini-SWE-agent. To reproduce the Gemini 2.5 Pro numbers from the
 SWE-bench leaderboard:
 
