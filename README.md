@@ -1,5 +1,7 @@
 # τGuardian Code Harness (LLM Coding Safety Harness)
 
+> **Portfolio:** For a concise overview of my AI-native engineering work, including a sanitized Governed Multiplayer AI case study and selected evidence map, see [PORTFOLIO.md](PORTFOLIO.md).
+
 This folder contains a minimal, model-agnostic harness to compare:
 
 - **Baseline** LLM code generation.
@@ -159,4 +161,3 @@ SWE-bench leaderboard:
 This keeps τGuardian's runtime simple and provider-agnostic, while allowing you to rely on the
 battle-tested mini-SWE-agent stack for the exact Gemini SWE-bench configuration used on the public
 leaderboard.
-
