@@ -21,18 +21,17 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
       - name: Unit and policy tests
         run: python -m pytest -q
-      - name: Ruff core files
+      - name: Ruff correctness gate
         run: >-
           ruff check
+          agent_merge_gate
           harness.py ast_security.py docker_sandbox.py llm_client.py
           tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py
           tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
       - name: Bandit medium/high findings
-        run: >-
-          bandit -q -ll
-          harness.py ast_security.py docker_sandbox.py llm_client.py
-          tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py
-          tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
+        run: |
+          bandit -q -ll -r agent_merge_gate
+          bandit -q -ll             harness.py ast_security.py docker_sandbox.py llm_client.py             tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py             tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
       - name: Build fixed runner image
         run: docker build -f Dockerfile.runner -t guardian-evidence-runner:py311 .
       - name: Sandbox image smoke test
