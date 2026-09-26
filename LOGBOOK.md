@@ -154,3 +154,30 @@ Each imported destination Git blob exactly matched its recorded source blob:
 **Canonical project state:** `main` now contains the source-of-truth file, append-only logbook, V0 product charter, provenance-preserving sanitized imports, and CI coverage for ongoing `product/**` branches.
 
 **Next authorized product step:** implement the first Agent Merge Gate V0 product modules and seeded-defect validation fixtures in this repository only.
+
+
+---
+
+## 2026-09-26 — Canonical full roadmap committed
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Starting main commit:** `32d89051d913a72e92538681b30464488a42c696`
+
+**Working branch:** `product/save-full-roadmap`
+
+**Action:** added `ROADMAP.md` as the canonical end-to-end Agent Merge Gate roadmap.
+
+**Roadmap commit:** `63dbbe3b3e51945edc8d68cc8e6bde15fa40c160`
+
+**Roadmap scope:** phases 0–15 covering foundation, merge-gate core, PR intake, deterministic evidence, requirements/invariants, semantic audit, reproduction, seeded benchmark, real-repository validation, GitHub Action, human review, GitHub App/service, product hardening, competitive validation, commercial wedge, and controlled expansion.
+
+**Key sequencing rule:** do not build the SaaS before the seeded/real benchmark demonstrates material value beyond simpler alternatives.
+
+**External repository mutations:** none.
+
+**Verification status:** CI pending at the time of this entry.
+
+**Next:** verify the exact roadmap branch with CI and merge into `main`.
