@@ -2,7 +2,7 @@ name: Evidence Gate CI
 
 on:
   push:
-    branches: [main, "reality/**"]
+    branches: [main, "reality/**", "product/**"]
   pull_request:
 
 permissions:
