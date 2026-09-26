@@ -127,7 +127,8 @@ A successful collection may produce:
 - `ruff.json`;
 - `bandit.json`;
 - `execution.json`;
-- `evidence-bundle.json`.
+- `evidence-bundle.json`;
+- `semantic-evidence.json`.
 
 The execution record includes:
 
@@ -195,3 +196,42 @@ Completion requires a real pull request to:
 - retain the artifact package for inspection;
 - reproduce materially stable evidence on rerun, with expected exceptions such
   as durations and raw pytest timing metadata documented rather than hidden.
+
+
+## Run provenance vs semantic reproducibility
+
+Two independent executions of the same candidate are not expected to produce
+byte-identical complete evidence bundles.
+
+Legitimate per-run variation includes:
+
+- execution durations;
+- local Docker image IDs when an equivalent image is rebuilt;
+- JUnit timing bytes;
+- pytest timing output;
+- Bandit `generated_at` timestamps;
+- raw artifact hashes derived from those run-local values.
+
+Those values remain preserved in the exact run evidence.
+
+Phase 3 therefore also writes `semantic-evidence.json`. Its stable fingerprint
+includes the substantive facts required to answer whether the rerun produced
+the same result:
+
+- repository/base/candidate/diff identity;
+- intake digest;
+- exact Git archive digest;
+- runner specification digest;
+- runner/tool versions and stable tool subcommands;
+- pytest completion and result counts;
+- Ruff structured findings;
+- Bandit structured and blocking findings;
+- locked criteria;
+- final adjudicated decision.
+
+It excludes run-local timings, ephemeral host mount paths, exact rebuilt image
+IDs, and raw artifact hashes that legitimately contain timestamps.
+
+A reproducibility claim requires matching semantic fingerprints on the same
+exact candidate; a changed complete bundle hash by itself is not a failure of
+reproducibility.
