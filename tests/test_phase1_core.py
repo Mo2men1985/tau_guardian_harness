@@ -18,8 +18,10 @@ from agent_merge_gate import (
     CriteriaLock,
     Criterion,
     CriterionEvidence,
+    EvidenceBundle,
     EvidenceRecord,
     EvidenceRegistry,
+    DecisionResult,
     MergeGateError,
     adjudicate,
     build_bundle,
@@ -293,4 +295,107 @@ def test_independent_review_record_requires_independent_reviewer_origin():
             "generator",
             True,
             True,
+        )
+
+
+def test_bundle_rejects_forged_decision():
+    registry = EvidenceRegistry((make_record(),))
+    submission = make_submission("e1")
+    criteria_lock = make_lock()
+    target = make_target()
+    bundle = build_bundle(
+        target=target,
+        criteria_lock=criteria_lock,
+        evidence_registry=registry,
+        submission=submission,
+    )
+    forged = DecisionResult(
+        decision=ABSTAIN,
+        reason_codes=("FORGED_DECISION",),
+        criteria=bundle.decision.criteria,
+    )
+    with pytest.raises(MergeGateError, match="BUNDLE_DECISION_MISMATCH"):
+        EvidenceBundle(
+            schema_version=bundle.schema_version,
+            manifest=bundle.manifest,
+            decision=forged,
+            criteria_lock=criteria_lock,
+            evidence_registry=registry,
+            submission=submission,
+        )
+
+
+def test_bundle_rejects_criteria_lock_hash_mismatch():
+    registry = EvidenceRegistry((make_record(),))
+    submission = make_submission("e1")
+    original_lock = make_lock()
+    bundle = build_bundle(
+        target=make_target(),
+        criteria_lock=original_lock,
+        evidence_registry=registry,
+        submission=submission,
+    )
+    changed_lock = CriteriaLock(
+        "policy-v1",
+        (
+            Criterion(
+                "tests-pass",
+                True,
+                frozenset({DETERMINISTIC}),
+                frozenset({"different-proposition"}),
+            ),
+        ),
+    )
+    with pytest.raises(MergeGateError, match="BUNDLE_CRITERIA_LOCK_HASH_MISMATCH"):
+        EvidenceBundle(
+            schema_version=bundle.schema_version,
+            manifest=bundle.manifest,
+            decision=bundle.decision,
+            criteria_lock=changed_lock,
+            evidence_registry=registry,
+            submission=submission,
+        )
+
+
+def test_bundle_rejects_registry_hash_mismatch():
+    registry = EvidenceRegistry((make_record(),))
+    submission = make_submission("e1")
+    criteria_lock = make_lock()
+    bundle = build_bundle(
+        target=make_target(),
+        criteria_lock=criteria_lock,
+        evidence_registry=registry,
+        submission=submission,
+    )
+    changed_registry = EvidenceRegistry((make_record(), make_record("e2")))
+    with pytest.raises(MergeGateError, match="BUNDLE_EVIDENCE_REGISTRY_HASH_MISMATCH"):
+        EvidenceBundle(
+            schema_version=bundle.schema_version,
+            manifest=bundle.manifest,
+            decision=bundle.decision,
+            criteria_lock=criteria_lock,
+            evidence_registry=changed_registry,
+            submission=submission,
+        )
+
+
+def test_bundle_rejects_submission_hash_mismatch():
+    registry = EvidenceRegistry((make_record(),))
+    submission = make_submission("e1")
+    criteria_lock = make_lock()
+    bundle = build_bundle(
+        target=make_target(),
+        criteria_lock=criteria_lock,
+        evidence_registry=registry,
+        submission=submission,
+    )
+    changed_submission = AuditSubmission(())
+    with pytest.raises(MergeGateError, match="BUNDLE_SUBMISSION_HASH_MISMATCH"):
+        EvidenceBundle(
+            schema_version=bundle.schema_version,
+            manifest=bundle.manifest,
+            decision=bundle.decision,
+            criteria_lock=criteria_lock,
+            evidence_registry=registry,
+            submission=changed_submission,
         )
