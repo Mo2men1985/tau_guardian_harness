@@ -1,6 +1,16 @@
 FROM python:3.11-slim
-RUN useradd --system --uid 10001 runner \
-    && pip install --no-cache-dir pytest==8.3.5
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 runner \
+    && pip install --no-cache-dir \
+        pytest==8.3.5 \
+        ruff==0.12.12 \
+        bandit==1.8.6 \
+        PyYAML==6.0.2 \
+        defusedxml==0.7.1
+
 USER 10001:10001
 WORKDIR /workspace
 ENTRYPOINT []
