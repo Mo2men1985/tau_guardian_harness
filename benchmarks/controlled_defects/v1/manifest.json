@@ -3,90 +3,98 @@
   "frozen_before_candidate_execution": true,
   "base_commit": "f2cd5689c3c59cecee56a2fb0eb4a95fc16772a2",
   "system_under_test": "Agent Merge Gate Phase-3 deterministic vertical slice",
+  "purpose": "Measure defects that plausibly survive the existing repository test suite; do not credit failures already directly asserted by ordinary CI.",
   "rules": {
     "ground_truth_may_not_be_changed_after_candidate_execution": true,
     "system_outcome_source": "actual Agent Merge Gate evidence bundle only",
     "manual_reviewer_output_counts_as_detection": false,
+    "defect_detection_requires_causal_evidence": true,
+    "unrelated_veto_classification": "INCIDENTAL_BLOCK",
     "pass_on_defective_candidate": "MISS",
     "abstain_on_defective_candidate": "ABSTAIN",
-    "veto_on_defective_candidate": "DETECTED",
+    "causally_linked_veto_on_defective_candidate": "DETECTED",
     "pass_on_clean_control": "CORRECT_ACCEPT",
     "veto_on_clean_control": "FALSE_POSITIVE",
     "abstain_on_clean_control": "ABSTAIN"
   },
   "cases": [
     {
-      "case_id": "CLEAN-JWT-001",
-      "kind": "clean_control",
-      "source_file": "tg_code/jwt_auth_middleware_solution.py",
-      "requirement_source": "tasks/jwt_auth_middleware_spec.txt",
-      "invariant": "Requests without a valid signed bearer token must not reach the wrapped handler.",
-      "mutation": "none",
-      "ground_truth": "CLEAN"
-    },
-    {
-      "case_id": "DEF-JWT-001",
-      "kind": "defect",
-      "source_file": "tg_code/jwt_auth_middleware_solution.py",
-      "requirement_source": "tasks/jwt_auth_middleware_spec.txt",
-      "invariant": "Requests without a valid signed bearer token must not reach the wrapped handler.",
-      "mutation": "Replace signature rejection with unconditional handler execution after parsing a token.",
-      "ground_truth": "DEFECTIVE",
-      "expected_observable_failure": "An invalid-signature bearer token reaches the handler.",
-      "failure_class": "authorization_bypass"
-    },
-    {
       "case_id": "CLEAN-TRANSFER-001",
       "kind": "clean_control",
       "source_file": "tg_code/funds_transfer_solution.py",
       "requirement_source": "tasks/funds_transfer_spec.txt",
-      "invariant": "Only the owner of the source account may transfer funds and a failed transfer must not partially mutate balances.",
+      "invariant": "A valid owned-account transfer is atomic and preserves the intended debit/credit behavior.",
       "mutation": "none",
       "ground_truth": "CLEAN"
     },
     {
-      "case_id": "DEF-TRANSFER-AUTH-001",
+      "case_id": "DEF-TRANSFER-ROLLBACK-001",
       "kind": "defect",
       "source_file": "tg_code/funds_transfer_solution.py",
       "requirement_source": "tasks/funds_transfer_spec.txt",
-      "invariant": "Only the owner of the source account may transfer funds.",
-      "mutation": "Remove the source-account ownership rejection.",
+      "invariant": "Debit and credit must execute inside the transaction so a failure cannot leave a partial transfer.",
+      "mutation": "Move source-account debit immediately before entering repo.begin_transaction(), leaving only credit inside the transaction.",
       "ground_truth": "DEFECTIVE",
-      "expected_observable_failure": "A different user can debit the source account.",
-      "failure_class": "authorization_bypass"
+      "expected_observable_failure": "If repo.credit raises after debit succeeds, the source balance remains debited instead of being rolled back.",
+      "existing_suite_gap": "Existing funds-transfer tests cover success, overdraw, ownership and non-positive amount but do not inject a credit failure and assert rollback.",
+      "failure_class": "transaction_atomicity"
     },
     {
-      "case_id": "DEF-SQL-001",
-      "kind": "defect",
-      "source_file": "tg_code/sql_search_users_solution.py",
-      "requirement_source": "tasks/sql_search_users_spec.txt",
-      "invariant": "Untrusted search prefixes must be passed as query parameters rather than interpolated into SQL text.",
-      "mutation": "Interpolate the prefix directly into the LIKE expression and return no bound parameter.",
-      "ground_truth": "DEFECTIVE",
-      "expected_observable_failure": "Raw untrusted prefix appears in SQL query text.",
-      "failure_class": "unsafe_query_construction"
+      "case_id": "CLEAN-RATE-001",
+      "kind": "clean_control",
+      "source_file": "tg_code/rate_limiter_solution.py",
+      "requirement_source": "tasks/rate_limiter_spec.txt",
+      "invariant": "At most three requests per user are allowed within any rolling ten-second window.",
+      "mutation": "none",
+      "ground_truth": "CLEAN"
     },
     {
-      "case_id": "DEF-UPLOAD-001",
-      "kind": "defect",
-      "source_file": "tg_code/file_upload_validator_solution.py",
-      "requirement_source": "tasks/file_upload_validator_spec.txt",
-      "invariant": "An upload must satisfy both the allowed extension and its matching content type.",
-      "mutation": "Accept any content type for an otherwise allowed extension.",
-      "ground_truth": "DEFECTIVE",
-      "expected_observable_failure": "A .pdf file carrying an incompatible content type is accepted.",
-      "failure_class": "validation_bypass"
-    },
-    {
-      "case_id": "DEF-RATE-001",
+      "case_id": "DEF-RATE-BOUNDARY-001",
       "kind": "defect",
       "source_file": "tg_code/rate_limiter_solution.py",
       "requirement_source": "tasks/rate_limiter_spec.txt",
-      "invariant": "At most three requests per user are allowed inside the ten-unit sliding window.",
-      "mutation": "Raise the effective request limit from three to four.",
+      "invariant": "Requests exactly ten seconds apart are not simultaneously inside a ten-second rolling window.",
+      "mutation": "Expire timestamps only when dq[0] < ts - window instead of using the implementation's inclusive-window cutoff ts - window + 1.",
       "ground_truth": "DEFECTIVE",
-      "expected_observable_failure": "A fourth request in the same window is accepted.",
-      "failure_class": "business_rule_violation"
+      "expected_observable_failure": "After accepted requests at t=0,1,2, a request at t=10 is incorrectly blocked because t=0 is retained.",
+      "existing_suite_gap": "Existing tests check t=11 expiry after requests at 0,5,9, but do not test the exact ten-second boundary.",
+      "failure_class": "boundary_semantics"
+    },
+    {
+      "case_id": "DEF-JWT-CASE-001",
+      "kind": "defect",
+      "source_file": "tg_code/jwt_auth_middleware_solution.py",
+      "requirement_source": "tasks/jwt_auth_middleware_spec.txt",
+      "invariant": "The Authorization scheme must match the specified form 'Bearer <token>'; malformed schemes must be rejected.",
+      "mutation": "Accept the authentication scheme case-insensitively by comparing parts[0].lower() to 'bearer'.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "A request using 'bearer <valid-token>' is accepted despite not matching the specified 'Bearer <token>' form.",
+      "existing_suite_gap": "Existing tests cover valid Bearer, missing header and invalid signature, but do not exercise malformed scheme casing.",
+      "failure_class": "authorization_format_validation"
+    },
+    {
+      "case_id": "DEF-UPLOAD-BOOLSIZE-001",
+      "kind": "defect",
+      "source_file": "tg_code/file_upload_validator_solution.py",
+      "requirement_source": "tasks/file_upload_validator_spec.txt",
+      "invariant": "size_bytes represents an integer byte count; non-byte-count values must not be accepted as valid positive sizes.",
+      "mutation": "Remove the explicit type check for size_bytes; Python booleans then behave as integers and True is accepted as a one-byte upload.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "validate_upload('a.pdf', 'application/pdf', True) returns True.",
+      "existing_suite_gap": "Existing tests cover normal integer sizes, oversize and zero but do not cover boolean/non-integer size values.",
+      "failure_class": "input_type_validation"
+    },
+    {
+      "case_id": "DEF-RESET-DOMAINSEP-001",
+      "kind": "defect",
+      "source_file": "tg_code/password_reset_token_solution.py",
+      "requirement_source": "tasks/password_reset_token_spec.txt",
+      "invariant": "The keyed-hash message must unambiguously encode the ordered tuple (user_id, issued_at).",
+      "mutation": "Remove the ':' separator and hash f'{user_id}{issued_at}', making distinct tuples capable of producing the same message.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "Distinct tuples such as ('user1', 23) and ('user12', 3) produce the same HMAC input and therefore the same token under the same key.",
+      "existing_suite_gap": "Existing tests vary one normal input at a time but do not test ambiguous tuple encodings.",
+      "failure_class": "cryptographic_message_ambiguity"
     }
   ]
 }
