@@ -414,3 +414,27 @@ Observed corrected result:
 **External repository mutations:** none.
 
 **Next canonical roadmap phase:** Phase 2 — Git / PR Intake, with Phase 1 mutation testing retained as a permanent CI regression gate.
+
+
+---
+
+## 2026-09-26 — Production value doctrine established
+
+**Actor:** Owner + ChatGPT
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Branch:** `product/production-value-doctrine`
+
+**Owner directive:** the project goal is not to pass tests. The goal is to build a real Agent Merge Gate product that eventually reaches production, performs serious work, and provides real user value. Tests must therefore be real and serve as evidence about actual product behavior rather than as vanity metrics or pipeline targets.
+
+**Canonical changes:**
+- added `Production value doctrine` to `SOURCE_OF_TRUTH.md`;
+- updated `ROADMAP.md` principles so tests/CI are explicitly evidence rather than the objective;
+- established production readiness and real customer value as the governing engineering target.
+
+**Practical consequence:** future work must favor realistic integrations, adverse conditions, externally meaningful benchmarks, real repository behavior, independent evidence, reliability, security, operability, and measurable customer value. Test counts alone are not accepted as a readiness claim.
+
+**External repository mutations:** none.
+
+**Next:** merge this doctrine into canonical `main` and apply it to every subsequent phase.
