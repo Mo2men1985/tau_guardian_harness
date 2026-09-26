@@ -352,3 +352,38 @@ def test_semantic_fingerprint_ignores_run_local_noise():
     )
     assert first["fingerprint_sha256"] == second["fingerprint_sha256"]
     assert first["payload"] == second["payload"]
+
+
+def test_semantic_payload_contains_runner_spec_once():
+    pytest_clean = pytest_result()
+    ruff_clean = tool_result(b"[]")
+    bandit_clean = tool_result(b'{"results":[]}')
+    registry = EvidenceRegistry(
+        (
+            _pytest_record(pytest_clean, CANDIDATE, "sha256:runner"),
+            _ruff_record(ruff_clean, CANDIDATE, "sha256:runner")[0],
+            _bandit_record(bandit_clean, CANDIDATE, "sha256:runner")[0],
+        )
+    )
+    criteria, submission = _criteria_for(include_ruff=True, include_bandit=True)
+    bundle = build_bundle(
+        target=make_intake().audit_target,
+        criteria_lock=criteria,
+        evidence_registry=registry,
+        submission=submission,
+    )
+    semantic = build_semantic_evidence(
+        intake=make_intake(),
+        archive_sha256="1" * 64,
+        runner_spec_sha256="2" * 64,
+        image="runner",
+        pytest_result=pytest_clean,
+        ruff_result=ruff_clean,
+        ruff_findings=[],
+        bandit_result=bandit_clean,
+        bandit_findings=[],
+        bandit_blocking=[],
+        bundle=bundle,
+    )
+    assert semantic["payload"]["runner_spec_sha256"] == "2" * 64
+    assert list(semantic["payload"]).count("runner_spec_sha256") == 1
