@@ -81,3 +81,41 @@ Corrections are added as later entries rather than silently rewriting historical
 **Verification status:** CI pending at the time of this entry.
 
 **Next:** run/inspect branch CI and append the exact result.
+
+
+---
+
+## 2026-09-26 — Foundation verification
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Branch head tested:** `ab726275feb9c29b1b3bd32ae917ce16d3cf1cfd`
+
+**GitHub Actions:** Evidence Gate CI run #19, run id `36224096173`
+
+**Result:** PASS
+
+**Completed gates:**
+- dependency installation — PASS;
+- unit and policy tests — PASS;
+- correctness-class Ruff gate — PASS;
+- Bandit medium/high gate — PASS;
+- fixed runner image build — PASS;
+- hardened sandbox smoke test — PASS.
+
+**Import integrity verification:** PASS
+
+Each imported destination Git blob exactly matched its recorded source blob:
+
+- governance: `99cc336a37a72d2144276fa3a971c8a8c14557bd`;
+- evidence: `77b1df185397fbb2f202ec960e7098c082289bd1`;
+- credential destination: `a7bf210e36c7ff1b3ad983992dd8c12bee1e317f`;
+- mutation harness: `a5ec3bbe174db535e71be196fae26a3b9982b031`.
+
+**CI maintenance action:** `.github/workflows/ci.yml` was extended to run on `product/**` branches so ongoing Agent Merge Gate work is continuously checked.
+
+**External repository mutations:** none.
+
+**Status:** foundation is suitable for merge into `main`.
+
+**Logging note:** this entry records the substantive actions and their verification. The commit that appends a log entry is itself tracked by Git history; CI generated solely by that append is tracked by GitHub Actions and can be referenced by the next substantive entry, avoiding recursive log-only commits.
