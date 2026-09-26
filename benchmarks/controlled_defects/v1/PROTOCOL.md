@@ -101,3 +101,12 @@ These cases are intentionally small and derived from existing repository
 fixtures. They are an early product-value diagnostic, not a representative
 industry benchmark. Results must not be generalized to arbitrary repositories,
 languages, defect distributions, or production environments.
+
+## Pre-execution design review
+
+Before the first benchmark candidate was executed, automated Codex review of PR
+#32 identified two P1 design defects: the original seeds were already directly
+covered by ordinary tests, and aggregate VETO alone did not establish causal
+detection. Baseline v1 was revised **before execution** to incorporate both
+constraints. The review remains part of the repository record; it is design
+evidence, not system-under-test evidence.
