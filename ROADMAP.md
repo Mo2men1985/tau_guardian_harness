@@ -181,7 +181,7 @@ This establishes deterministic Git/PR intake for the current same-repository Git
 
 # Phase 3 — Deterministic Evidence Layer
 
-**Status: IN PROGRESS**
+**Status: COMPLETE for the controlled Python vertical slice**
 
 Expand Guardian Evidence Gate into the PR evidence collector.
 
@@ -755,25 +755,41 @@ Evidence must be bound to the exact candidate/version it supports.
 
 # Immediate next phase
 
-The next authorized product phase is:
+## Early Controlled Defect Baseline
 
-## Phase 3 — Deterministic Evidence Vertical Slice
+Before expanding into a large semantic-auditor implementation, test whether the current deterministic gate produces real incremental value.
 
-The immediate target is not a larger framework. It is to connect the exact Phase-2 candidate to real deterministic evidence collection and then into the existing Phase-1 adjudicator.
+Create a small, explicit ground-truth benchmark inside this repository with approximately 5–10 deliberately defective PR-equivalent candidates covering high-value failure classes such as:
 
-First production-value slice:
+1. authorization bypass;
+2. cross-tenant data access;
+3. swallowed/hidden failure;
+4. unsafe query construction;
+5. hard-coded secret or credential exposure;
+6. transaction/rollback failure;
+7. unsafe dependency or security regression;
+8. destructive migration behavior;
+9. idempotency/concurrency regression;
+10. a misleading or weakened test that allows incorrect behavior.
 
-1. take the exact PR intake artifact and candidate SHA;
-2. execute real pytest/JUnit evidence against that candidate in the hardened sandbox;
-3. collect structured Ruff and Bandit evidence bound to the same candidate;
-4. preserve tool versions, commands, exit codes, completion/timeout state, findings, artifact hashes, and duration;
-5. construct trusted `EvidenceRecord` objects from those real artifacts;
-6. apply a minimal locked criteria set without inventing a score;
-7. produce a commit-bound Evidence Bundle and PASS / ABSTAIN / VETO decision;
-8. retain the complete artifact set so the run can be independently inspected and rerun.
+For every seed, ground truth must specify the intended requirement, exact defect, expected observable failure, and why the defect is valid. Do not invent success criteria after observing the gate.
 
-The next meaningful milestone is:
+Compare at minimum:
 
-> A real PR flows from exact Git identity through real deterministic checks into a Phase-1 evidence bundle and verdict.
+- ordinary repository CI / existing tests;
+- Phase-3 deterministic Agent Merge Gate.
 
-Immediately after that slice works, begin an early controlled defect baseline rather than waiting until the entire later architecture is built.
+Measure:
+
+- seeded defects detected;
+- seeded defects missed;
+- false positives on clean controls;
+- ABSTAIN cases;
+- reproducibility;
+- runtime/cost where measurable.
+
+The immediate product question is:
+
+> Does the current gate catch meaningful defects that ordinary CI would allow through?
+
+If the answer is weak, use the misses to drive the next requirement/invariant and semantic-auditor work. Do not hide misses or replace them with a synthetic score.

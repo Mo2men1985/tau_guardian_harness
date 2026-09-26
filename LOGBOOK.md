@@ -633,3 +633,50 @@ The outer ZIP artifact digests differed because workflow artifact archives conta
 **External repository mutations:** none.
 
 **Phase status:** IN PROGRESS pending final exact-head PASS and matching semantic fingerprints across independent reruns.
+
+
+---
+
+## 2026-09-26 — Phase 3 deterministic evidence vertical slice completed
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Pull request:** #30 — `Implement Phase 3 deterministic evidence vertical slice`
+
+**Final verified PR candidate:** `72593cb4f5d717dd29a378437966bf52475a4e2c`
+
+**Base SHA:** `b80ad00d04cbd3ce7db28e5be9d31afcf74c88d6`
+
+**Real PR workflow:** run #115, run id `36230023445` — PASS.
+
+**Final real deterministic evidence:**
+- exact candidate archive SHA-256: `19a2a656e51c1d7d5fc48783f554dc21e0e7354067c6a6da4be8528b839d3306`;
+- diff SHA-256: `8f4e9fb98ec1c03769eb5d6234a6e537a5a6ad8e2dd1dc8357e42625bdd26a5b`;
+- pytest: 93 collected / 93 passed / 0 failed / 0 errors / 0 skipped;
+- Ruff: structured evidence complete, 0 findings;
+- Bandit: structured evidence complete, 8 low-severity findings, 0 blocking medium/high severity+confidence findings;
+- all three locked deterministic criteria: PASS;
+- overall Evidence Bundle verdict: PASS;
+- runner spec SHA-256: `044d0f54fee7e028040f96a6d02f3bd05035fc7ad595dcb5b1c5d0555d7acb66`.
+
+**Independent rerun evidence:** two executions of the exact candidate produced the same substantive semantic evidence and the same semantic fingerprint:
+
+`0a934a2533d2e33448580aa54162475a98b24e572919095d0f149d8883e505db`
+
+The exact Evidence Bundle hashes differed (`22ec246e...` vs `3d679519...`) because exact run provenance intentionally includes run-local data such as timing and timestamp-bearing JUnit output. This is not represented as byte-identical full-run reproducibility. Semantic reproducibility is measured separately and matched exactly.
+
+**Merge commit:** `df7ac3dda872dc3b64decd8514150c11f1ed7c84` (signed/verified).
+
+**Post-merge main CI:** run #116, run id `36230239928` — PASS.
+
+**What Phase 3 proves:** for the controlled Python repository topology, a real PR can flow from exact Git identity through isolated deterministic execution into retained pytest/Ruff/Bandit evidence, trusted candidate-bound EvidenceRecords, locked criteria, a hash-bound Evidence Bundle, and an enforced PASS/ABSTAIN/VETO decision.
+
+**What Phase 3 does not prove:** arbitrary customer-repository safety, semantic/business-logic correctness, independence of candidate-supplied tests, defect-detection advantage over ordinary CI, forked-PR compatibility, broad language/framework support, production deployment, or commercial value.
+
+**Governance gap retained:** `main` remains unprotected because repository-administration write access is unavailable through the connected capability.
+
+**External repository mutations:** none.
+
+**Canonical Phase 3 status:** COMPLETE FOR CONTROLLED PYTHON VERTICAL SLICE.
+
+**Next:** early controlled defect baseline. Measure whether the deterministic gate catches meaningful seeded defects that ordinary CI misses before expanding the semantic-auditor architecture.
