@@ -7,6 +7,7 @@ from agent_merge_gate.container_runner import ContainerCommandResult, PytestCont
 from agent_merge_gate.deterministic_evidence import (
     _bandit_record,
     _criteria_for,
+    build_semantic_evidence,
     _pytest_record,
     _ruff_record,
     materialize_candidate,
@@ -232,3 +233,122 @@ def test_verdict_exit_codes_are_fail_closed():
     assert verdict_exit_code(PASS) == 0
     assert verdict_exit_code(ABSTAIN) != 0
     assert verdict_exit_code(VETO) != 0
+
+
+def test_semantic_fingerprint_ignores_run_local_noise():
+    pytest_one = pytest_result()
+    pytest_two = PytestContainerResult(
+        command=pytest_one.command,
+        exit_code=pytest_one.exit_code,
+        completed=pytest_one.completed,
+        timed_out=pytest_one.timed_out,
+        duration_ms=9999,
+        collected=pytest_one.collected,
+        passed=pytest_one.passed,
+        failed=pytest_one.failed,
+        errors=pytest_one.errors,
+        skipped=pytest_one.skipped,
+        junit=b"different-run-bytes",
+        junit_sha256=hashlib.sha256(b"different-run-bytes").hexdigest(),
+        stdout=b"different timing output",
+        stdout_sha256=hashlib.sha256(b"different timing output").hexdigest(),
+        version=pytest_one.version,
+        error=pytest_one.error,
+    )
+
+    ruff_one = ContainerCommandResult(
+        command=("docker", "run", "-v", "/tmp/a:/workspace:ro", "runner", "ruff", "check"),
+        exit_code=0,
+        completed=True,
+        timed_out=False,
+        duration_ms=1,
+        stdout=b"[]",
+        stdout_sha256=hashlib.sha256(b"[]").hexdigest(),
+        stderr=b"",
+        stderr_sha256=hashlib.sha256(b"").hexdigest(),
+        version="ruff 0.12.12",
+        error=None,
+    )
+    ruff_two = ContainerCommandResult(
+        command=("docker", "run", "-v", "/tmp/b:/workspace:ro", "runner", "ruff", "check"),
+        exit_code=0,
+        completed=True,
+        timed_out=False,
+        duration_ms=500,
+        stdout=b"[]",
+        stdout_sha256=hashlib.sha256(b"[]").hexdigest(),
+        stderr=b"run-local warning",
+        stderr_sha256=hashlib.sha256(b"run-local warning").hexdigest(),
+        version="ruff 0.12.12",
+        error=None,
+    )
+    bandit_one = ContainerCommandResult(
+        command=("docker", "run", "-v", "/tmp/a:/workspace:ro", "runner", "bandit", "-f", "json"),
+        exit_code=0,
+        completed=True,
+        timed_out=False,
+        duration_ms=1,
+        stdout=b'{"results":[]}',
+        stdout_sha256=hashlib.sha256(b'{"results":[]}').hexdigest(),
+        stderr=b"",
+        stderr_sha256=hashlib.sha256(b"").hexdigest(),
+        version="bandit 1.8.6",
+        error=None,
+    )
+    bandit_two = ContainerCommandResult(
+        command=("docker", "run", "-v", "/tmp/b:/workspace:ro", "runner", "bandit", "-f", "json"),
+        exit_code=0,
+        completed=True,
+        timed_out=False,
+        duration_ms=800,
+        stdout=b'{"results":[]}',
+        stdout_sha256=hashlib.sha256(b'{"results":[]}').hexdigest(),
+        stderr=b"different warning timestamp",
+        stderr_sha256=hashlib.sha256(b"different warning timestamp").hexdigest(),
+        version="bandit 1.8.6",
+        error=None,
+    )
+
+    registry = EvidenceRegistry(
+        (
+            _pytest_record(pytest_one, CANDIDATE, "sha256:run-one"),
+            _ruff_record(ruff_one, CANDIDATE, "sha256:run-one")[0],
+            _bandit_record(bandit_one, CANDIDATE, "sha256:run-one")[0],
+        )
+    )
+    criteria, submission = _criteria_for(include_ruff=True, include_bandit=True)
+    bundle = build_bundle(
+        target=make_intake().audit_target,
+        criteria_lock=criteria,
+        evidence_registry=registry,
+        submission=submission,
+    )
+
+    first = build_semantic_evidence(
+        intake=make_intake(),
+        archive_sha256="1" * 64,
+        runner_spec_sha256="2" * 64,
+        image="runner",
+        pytest_result=pytest_one,
+        ruff_result=ruff_one,
+        ruff_findings=[],
+        bandit_result=bandit_one,
+        bandit_findings=[],
+        bandit_blocking=[],
+        bundle=bundle,
+    )
+    second = build_semantic_evidence(
+        intake=make_intake(),
+        archive_sha256="1" * 64,
+        runner_spec_sha256="2" * 64,
+        image="runner",
+        pytest_result=pytest_two,
+        ruff_result=ruff_two,
+        ruff_findings=[],
+        bandit_result=bandit_two,
+        bandit_findings=[],
+        bandit_blocking=[],
+        bundle=bundle,
+    )
+    assert first["fingerprint_sha256"] == second["fingerprint_sha256"]
+    assert first["payload"] == second["payload"]
