@@ -121,6 +121,8 @@ Unit and negative tests demonstrate there is no accepted path from missing or st
 
 # Phase 2 — Git / PR Intake
 
+**Status: COMPLETE**
+
 Turn a GitHub pull request or local Git candidate into a normalized audit target.
 
 ## Normalize
@@ -158,6 +160,22 @@ The classification determines which evidence collectors and invariants are requi
 ### Exit gate
 
 The same exact PR/candidate produces the same normalized change inventory and candidate identity.
+
+**Completion evidence (2026-09-26):**
+- real Git intake implemented under `agent_merge_gate/intake.py`;
+- real Git integration tests use actual repositories, commits, and diverged base/head histories;
+- PR #28 was normalized from GitHub's exact base/head SHAs;
+- current verified PR head: `9e0050107b99654fa59846c1b2ae9c1e3b19e147`;
+- base SHA: `ef47a04f154641e5574a770e891325bb365e28bc`;
+- deterministic diff SHA-256: `033df49bb248da9835b96848e3cd66a01ecbf8449d414412719457ee98feccf6`;
+- two independent workflow attempts on the same exact head produced byte-identical canonical intake JSON;
+- canonical intake artifact SHA-256: `851caaf2db746fd097eb572b44292b8ece933f6fb9c8a4b36868818579d50093`;
+- PR workflow identified all 9 changed files, candidate manifests, pytest entrypoint, language inventory, and `BUSINESS_LOGIC` + `INFRA` routing;
+- PR #28 merge commit: `bedf14d49171a72e7b3c83acfd2200b890e0617e`;
+- post-merge main CI run #77: PASS;
+- Phase-1 mutation regression gate remained 18/18 killed.
+
+This establishes deterministic Git/PR intake for the current same-repository GitHub topology. Forked-PR topology and broader monorepo discovery remain later compatibility work, not implied by this completion claim.
 
 ---
 
@@ -737,18 +755,23 @@ Evidence must be bound to the exact candidate/version it supports.
 
 The next authorized product phase is:
 
-## Phase 2 — Git / PR Intake
+## Phase 3 — Deterministic Evidence Vertical Slice
 
-The first production-value milestone is a thin real vertical slice, not an isolated parser:
+The immediate target is not a larger framework. It is to connect the exact Phase-2 candidate to real deterministic evidence collection and then into the existing Phase-1 adjudicator.
 
-1. resolve a real repository base and candidate to exact commits;
-2. compute the PR merge-base and deterministic binary-capable diff hash;
-3. inventory real changed files, languages, manifests, migrations, infrastructure and security-sensitive paths;
-4. classify the change deterministically;
-5. emit a Phase-1 `AuditTarget` bound to the exact candidate and diff;
-6. run the intake on the actual pull request introducing Phase 2 and retain its machine-readable artifact;
-7. immediately connect the normalized target to real deterministic evidence collection rather than polishing abstractions in isolation.
+First production-value slice:
 
-Phase 2 is not complete merely because unit tests pass. Its meaningful exit evidence is that the same exact real PR produces the same normalized intake and candidate identity on rerun.
+1. take the exact PR intake artifact and candidate SHA;
+2. execute real pytest/JUnit evidence against that candidate in the hardened sandbox;
+3. collect structured Ruff and Bandit evidence bound to the same candidate;
+4. preserve tool versions, commands, exit codes, completion/timeout state, findings, artifact hashes, and duration;
+5. construct trusted `EvidenceRecord` objects from those real artifacts;
+6. apply a minimal locked criteria set without inventing a score;
+7. produce a commit-bound Evidence Bundle and PASS / ABSTAIN / VETO decision;
+8. retain the complete artifact set so the run can be independently inspected and rerun.
 
-No SaaS, dashboard, billing, or broad hosted-service work is required before this real vertical slice and early benchmark path function.
+The next meaningful milestone is:
+
+> A real PR flows from exact Git identity through real deterministic checks into a Phase-1 evidence bundle and verdict.
+
+Immediately after that slice works, begin an early controlled defect baseline rather than waiting until the entire later architecture is built.
