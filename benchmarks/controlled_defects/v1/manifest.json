@@ -1,0 +1,91 @@
+{
+  "schema_version": "controlled-defect-baseline-v1",
+  "frozen_before_candidate_execution": true,
+  "base_commit": "f2cd5689c3c59cecee56a2fb0eb4a95fc16772a2",
+  "system_under_test": "Agent Merge Gate Phase-3 deterministic vertical slice",
+  "selection_rule": "Defect mutations must be plausibly outside the assertions of the pre-existing ordinary pytest suite. This is verified again by actually running ordinary CI on each candidate; any candidate ordinary CI rejects is ineligible for the incremental-value subset.",
+  "rules": {
+    "ground_truth_may_not_be_changed_after_candidate_execution": true,
+    "system_outcome_source": "actual Agent Merge Gate evidence bundle only",
+    "manual_reviewer_output_counts_as_detection": false,
+    "pass_on_defective_candidate": "MISS",
+    "abstain_on_defective_candidate": "ABSTAIN",
+    "veto_with_seed_linked_adverse_evidence": "DETECTED",
+    "veto_without_seed_linked_adverse_evidence": "INCIDENTAL_BLOCK",
+    "ordinary_ci_failure": "INELIGIBLE_FOR_INCREMENTAL_VALUE_SUBSET",
+    "pass_on_clean_control": "CORRECT_ACCEPT",
+    "veto_on_clean_control": "FALSE_POSITIVE",
+    "abstain_on_clean_control": "ABSTAIN"
+  },
+  "cases": [
+    {
+      "case_id": "CLEAN-TRANSFER-001",
+      "kind": "clean_control",
+      "source_file": "tg_code/funds_transfer_solution.py",
+      "requirement_source": "tasks/funds_transfer_spec.txt",
+      "invariant": "Transfer authorization, positive amount, overdraft prevention and transaction atomicity satisfy the explicit task requirements.",
+      "mutation": "none",
+      "ground_truth": "CLEAN"
+    },
+    {
+      "case_id": "DEF-TRANSFER-ROLLBACK-001",
+      "kind": "defect",
+      "source_file": "tg_code/funds_transfer_solution.py",
+      "requirement_source": "tasks/funds_transfer_spec.txt",
+      "invariant": "Debit and credit must be atomic: if credit fails after debit, the source balance must be restored.",
+      "mutation": "Remove transaction rollback semantics while leaving the successful transfer path and existing authorization/amount/overdraft behavior unchanged.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "When repo.credit raises after debit, source balance remains reduced instead of being restored.",
+      "failure_class": "transaction_atomicity"
+    },
+    {
+      "case_id": "CLEAN-RATE-001",
+      "kind": "clean_control",
+      "source_file": "tg_code/rate_limiter_solution.py",
+      "requirement_source": "tasks/rate_limiter_spec.txt",
+      "invariant": "At most three requests per user are allowed in any rolling ten-second window.",
+      "mutation": "none",
+      "ground_truth": "CLEAN"
+    },
+    {
+      "case_id": "DEF-RATE-BOUNDARY-001",
+      "kind": "defect",
+      "source_file": "tg_code/rate_limiter_solution.py",
+      "requirement_source": "tasks/rate_limiter_spec.txt",
+      "invariant": "A request exactly nine seconds after the earliest accepted request is still inside the ten-second rolling window.",
+      "mutation": "Expire the oldest request one second too early at the lower rolling-window boundary while preserving the existing tested 0/1/2/3 and 0/5/9/11 examples.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "After accepted requests at t=0,1,2, a request at t=9 is incorrectly accepted instead of blocked.",
+      "failure_class": "boundary_business_rule"
+    },
+    {
+      "case_id": "CLEAN-TOKEN-001",
+      "kind": "clean_control",
+      "source_file": "tg_code/password_reset_token_solution.py",
+      "requirement_source": "tasks/password_reset_token_spec.txt",
+      "invariant": "Token uses a keyed hash over user_id and issued_at, remains URL-safe and does not expose the supplied secret key.",
+      "mutation": "none",
+      "ground_truth": "CLEAN"
+    },
+    {
+      "case_id": "DEF-TOKEN-SECRET-001",
+      "kind": "defect",
+      "source_file": "tg_code/password_reset_token_solution.py",
+      "requirement_source": "tasks/password_reset_token_spec.txt",
+      "invariant": "The supplied secret key must not be exposed in the returned token.",
+      "mutation": "Append a URL-safe encoding of the supplied secret key to the otherwise valid HMAC token, preserving determinism, input sensitivity and URL-safe characters checked by the existing tests.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "The returned reset token contains a reversible encoding of secret_key.",
+      "failure_class": "secret_exposure"
+    }
+  ],
+  "design_review": {
+    "status": "REVISED_BEFORE_FIRST_CANDIDATE_EXECUTION",
+    "reviewer": "Codex automated PR review",
+    "reviewed_commit": "70113fdfb62942574d0dbd447e7d5f372c192fd0",
+    "constraints": [
+      "Primary incremental-value cases must survive ordinary CI on the exact candidate.",
+      "A VETO counts as DETECTED only when blocking evidence is causally linked to the frozen seeded defect."
+    ]
+  }
+}
