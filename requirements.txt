@@ -5,3 +5,4 @@ pyyaml>=6,<7
 bandit>=1.8,<2
 pip-audit>=2.9,<3
 google-genai>=1.0.0
+defusedxml>=0.7.1,<1
