@@ -53,7 +53,7 @@ class EvidenceRecord:
             if self.producer_kind != TRUSTED_SYSTEM:
                 raise MergeGateError(f"TRUSTED_ORIGIN_REQUIRED: {self.evidence_id}")
         elif self.evidence_class == INDEPENDENT_REVIEW:
-            if self.producer_kind != INDEPENT_REVIEWER:
+            if self.producer_kind != INDEPENDENT_REVIEWER:
                 raise MergeGateError(f"INDEPENDENT_ORIGIN_REQUIRED: {self.evidence_id}")
         elif self.evidence_class == AGENT_ASSERTION:
             if self.producer_kind != AGENT:
