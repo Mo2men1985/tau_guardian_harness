@@ -15,6 +15,7 @@ python tg_post_apply_security_scan.py \
   --preds msa_outputs/preds.json \
   --dataset princeton-nlp/SWE-bench_Lite \
   --split test \
+  --dataset-revision <exact-dataset-commit> \
   --outdir msa_outputs/security_reports \
   --only example__repo-123
 ```
@@ -26,6 +27,7 @@ python tg_post_apply_security_scan.py \
   --preds msa_outputs/preds.json \
   --dataset princeton-nlp/SWE-bench_Lite \
   --split test \
+  --dataset-revision <exact-dataset-commit> \
   --outdir msa_outputs/security_reports \
   --force
 ```
@@ -47,3 +49,5 @@ python analyze_mini_swe_results.py \
 The official resolved/unresolved result remains independent evidence. Missing or
 failed required security evidence causes ABSTAIN; it is never converted into a
 synthetic success score.
+
+The dataset revision is mandatory. Record the exact revision alongside the evaluation artifacts so later reruns use the same dataset state.
