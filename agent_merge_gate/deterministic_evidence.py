@@ -288,6 +288,84 @@ def _criteria_for(
     )
 
 
+def _stable_tool_command(command: tuple[str, ...], image: str) -> list[str]:
+    """Remove Docker wrapper/temp mount paths from a tool command."""
+    values = list(command)
+    try:
+        index = values.index(image)
+    except ValueError:
+        return values
+    return values[index + 1 :]
+
+
+def _sorted_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(findings, key=canonical_json)
+
+
+def build_semantic_evidence(
+    *,
+    intake: GitIntake,
+    archive_sha256: str,
+    runner_spec_sha256: str | None,
+    image: str,
+    pytest_result: PytestContainerResult,
+    ruff_result: ContainerCommandResult,
+    ruff_findings: list[dict[str, Any]],
+    bandit_result: ContainerCommandResult,
+    bandit_findings: list[dict[str, Any]],
+    bandit_blocking: list[dict[str, Any]],
+    bundle: EvidenceBundle,
+) -> dict[str, Any]:
+    """Stable substantive evidence, excluding run-local timings and raw hashes."""
+    payload = {
+        "schema_version": "phase3-semantic-evidence-v1",
+        "repository": intake.audit_target.repository,
+        "base_sha": intake.audit_target.base_sha,
+        "candidate_sha": intake.audit_target.candidate_sha,
+        "diff_sha256": intake.audit_target.diff_sha256,
+        "intake_sha256": intake.digest,
+        "candidate_archive_sha256": archive_sha256,
+        "runner_image": image,
+        "runner_spec_sha256": runner_spec_sha256,
+        "runner_spec_sha256": runner_spec_sha256,
+        "pytest": {
+            "command": list(pytest_result.command),
+            "completed": pytest_result.completed,
+            "timed_out": pytest_result.timed_out,
+            "exit_code": pytest_result.exit_code,
+            "collected": pytest_result.collected,
+            "passed": pytest_result.passed,
+            "failed": pytest_result.failed,
+            "errors": pytest_result.errors,
+            "skipped": pytest_result.skipped,
+            "version": pytest_result.version,
+        },
+        "ruff": {
+            "command": _stable_tool_command(ruff_result.command, image),
+            "completed": ruff_result.completed,
+            "timed_out": ruff_result.timed_out,
+            "exit_code": ruff_result.exit_code,
+            "version": ruff_result.version,
+            "findings": _sorted_findings(ruff_findings),
+        },
+        "bandit": {
+            "command": _stable_tool_command(bandit_result.command, image),
+            "completed": bandit_result.completed,
+            "timed_out": bandit_result.timed_out,
+            "exit_code": bandit_result.exit_code,
+            "version": bandit_result.version,
+            "findings": _sorted_findings(bandit_findings),
+            "blocking_findings": _sorted_findings(bandit_blocking),
+        },
+        "criteria_lock": bundle.criteria_lock.to_dict(),
+        "decision": bundle.decision.to_dict(),
+    }
+    return {
+        "fingerprint_sha256": _sha256(canonical_json(payload).encode("utf-8")),
+        "payload": payload,
+    }
+
+
 def collect_deterministic_evidence(
     *,
     repo_path: str | Path,
@@ -317,6 +395,10 @@ def collect_deterministic_evidence(
             repo,
             intake.audit_target.candidate_sha,
             snapshot,
+        )
+        runner_spec = snapshot / "Dockerfile.runner"
+        runner_spec_sha256 = (
+            _sha256(runner_spec.read_bytes()) if runner_spec.is_file() else None
         )
         all_python, production_python = python_targets(intake)
 
@@ -368,6 +450,20 @@ def collect_deterministic_evidence(
         schema_version="phase3-evidence-bundle-v1",
     )
 
+    semantic = build_semantic_evidence(
+        intake=intake,
+        archive_sha256=archive_sha256,
+        runner_spec_sha256=runner_spec_sha256,
+        image=image,
+        pytest_result=pytest_result,
+        ruff_result=ruff_result,
+        ruff_findings=ruff_findings,
+        bandit_result=bandit_result,
+        bandit_findings=bandit_findings,
+        bandit_blocking=bandit_blocking,
+        bundle=bundle,
+    )
+
     execution = {
         "schema_version": "phase3-deterministic-run-v1",
         "repository": repository,
@@ -388,9 +484,11 @@ def collect_deterministic_evidence(
         "bandit_blocking_findings": bandit_blocking,
         "decision": bundle.decision.to_dict(),
         "bundle_sha256": bundle.bundle_sha256,
+        "semantic_fingerprint_sha256": semantic["fingerprint_sha256"],
     }
     _write_json(output / "execution.json", execution)
     _write_json(output / "evidence-bundle.json", bundle.to_dict())
+    _write_json(output / "semantic-evidence.json", semantic)
     return intake, bundle, execution
 
 
