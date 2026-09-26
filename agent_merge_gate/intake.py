@@ -402,7 +402,9 @@ def build_git_intake(
     file_items: list[ChangedFile] = []
     language_counts: dict[str, int] = {}
     all_classes: set[str] = set()
-    dependency: list[str] = []
+    dependency = sorted(
+        path for path in tree_paths if PurePosixPath(path).name in DEPENDENCY_BASENAMES
+    )
     migrations: list[str] = []
     infrastructure: list[str] = []
     sensitive: list[str] = []
@@ -413,8 +415,6 @@ def build_git_intake(
         if lang:
             language_counts[lang] = language_counts.get(lang, 0) + 1
         all_classes.update(classes)
-        if "DEPENDENCY" in classes:
-            dependency.append(changed_path)
         if "MIGRATION" in classes:
             migrations.append(changed_path)
         if "INFRA" in classes:
