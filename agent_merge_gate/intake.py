@@ -260,7 +260,8 @@ def _discover_test_commands(
 
     has_python = any(PurePosixPath(path).suffix == ".py" for path in tree_paths)
     has_tests = any(_is_test_path(path) for path in tree_paths)
-    if has_python and has_tests and any(PurePosixPath(p).name in PYTEST_CONFIGS for p in tree_paths):
+    has_root_pytest_config = any(config in path_set for config in PYTEST_CONFIGS)
+    if has_python and has_tests and has_root_pytest_config:
         commands.append("python -m pytest -q")
 
     package_paths = [path for path in tree_paths if PurePosixPath(path).name == "package.json"]
