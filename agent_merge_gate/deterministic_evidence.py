@@ -327,7 +327,6 @@ def build_semantic_evidence(
         "candidate_archive_sha256": archive_sha256,
         "runner_image": image,
         "runner_spec_sha256": runner_spec_sha256,
-        "runner_spec_sha256": runner_spec_sha256,
         "pytest": {
             "command": list(pytest_result.command),
             "completed": pytest_result.completed,
@@ -474,6 +473,7 @@ def collect_deterministic_evidence(
         "candidate_archive_sha256": archive_sha256,
         "runner_image": image,
         "runner_image_id": runner_id,
+        "runner_spec_sha256": runner_spec_sha256,
         "python_targets": list(all_python),
         "production_python_targets": list(production_python),
         "pytest": pytest_result.metadata(),
