@@ -1,0 +1,92 @@
+{
+  "schema_version": "controlled-defect-baseline-v1",
+  "frozen_before_candidate_execution": true,
+  "base_commit": "f2cd5689c3c59cecee56a2fb0eb4a95fc16772a2",
+  "system_under_test": "Agent Merge Gate Phase-3 deterministic vertical slice",
+  "rules": {
+    "ground_truth_may_not_be_changed_after_candidate_execution": true,
+    "system_outcome_source": "actual Agent Merge Gate evidence bundle only",
+    "manual_reviewer_output_counts_as_detection": false,
+    "pass_on_defective_candidate": "MISS",
+    "abstain_on_defective_candidate": "ABSTAIN",
+    "veto_on_defective_candidate": "DETECTED",
+    "pass_on_clean_control": "CORRECT_ACCEPT",
+    "veto_on_clean_control": "FALSE_POSITIVE",
+    "abstain_on_clean_control": "ABSTAIN"
+  },
+  "cases": [
+    {
+      "case_id": "CLEAN-JWT-001",
+      "kind": "clean_control",
+      "source_file": "tg_code/jwt_auth_middleware_solution.py",
+      "requirement_source": "tasks/jwt_auth_middleware_spec.txt",
+      "invariant": "Requests without a valid signed bearer token must not reach the wrapped handler.",
+      "mutation": "none",
+      "ground_truth": "CLEAN"
+    },
+    {
+      "case_id": "DEF-JWT-001",
+      "kind": "defect",
+      "source_file": "tg_code/jwt_auth_middleware_solution.py",
+      "requirement_source": "tasks/jwt_auth_middleware_spec.txt",
+      "invariant": "Requests without a valid signed bearer token must not reach the wrapped handler.",
+      "mutation": "Replace signature rejection with unconditional handler execution after parsing a token.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "An invalid-signature bearer token reaches the handler.",
+      "failure_class": "authorization_bypass"
+    },
+    {
+      "case_id": "CLEAN-TRANSFER-001",
+      "kind": "clean_control",
+      "source_file": "tg_code/funds_transfer_solution.py",
+      "requirement_source": "tasks/funds_transfer_spec.txt",
+      "invariant": "Only the owner of the source account may transfer funds and a failed transfer must not partially mutate balances.",
+      "mutation": "none",
+      "ground_truth": "CLEAN"
+    },
+    {
+      "case_id": "DEF-TRANSFER-AUTH-001",
+      "kind": "defect",
+      "source_file": "tg_code/funds_transfer_solution.py",
+      "requirement_source": "tasks/funds_transfer_spec.txt",
+      "invariant": "Only the owner of the source account may transfer funds.",
+      "mutation": "Remove the source-account ownership rejection.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "A different user can debit the source account.",
+      "failure_class": "authorization_bypass"
+    },
+    {
+      "case_id": "DEF-SQL-001",
+      "kind": "defect",
+      "source_file": "tg_code/sql_search_users_solution.py",
+      "requirement_source": "tasks/sql_search_users_spec.txt",
+      "invariant": "Untrusted search prefixes must be passed as query parameters rather than interpolated into SQL text.",
+      "mutation": "Interpolate the prefix directly into the LIKE expression and return no bound parameter.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "Raw untrusted prefix appears in SQL query text.",
+      "failure_class": "unsafe_query_construction"
+    },
+    {
+      "case_id": "DEF-UPLOAD-001",
+      "kind": "defect",
+      "source_file": "tg_code/file_upload_validator_solution.py",
+      "requirement_source": "tasks/file_upload_validator_spec.txt",
+      "invariant": "An upload must satisfy both the allowed extension and its matching content type.",
+      "mutation": "Accept any content type for an otherwise allowed extension.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "A .pdf file carrying an incompatible content type is accepted.",
+      "failure_class": "validation_bypass"
+    },
+    {
+      "case_id": "DEF-RATE-001",
+      "kind": "defect",
+      "source_file": "tg_code/rate_limiter_solution.py",
+      "requirement_source": "tasks/rate_limiter_spec.txt",
+      "invariant": "At most three requests per user are allowed inside the ten-unit sliding window.",
+      "mutation": "Raise the effective request limit from three to four.",
+      "ground_truth": "DEFECTIVE",
+      "expected_observable_failure": "A fourth request in the same window is accepted.",
+      "failure_class": "business_rule_violation"
+    }
+  ]
+}
