@@ -5,7 +5,7 @@ from typing import Dict, Optional
 # NOTE: This starter implementation is intentionally insecure.
 # It uses the `random` module to generate session IDs, which is not
 # suitable for security-sensitive tokens. The functional behaviour is
-# correct, but τGuardian's security checks should flag this.
+# correct, but the advisory custom security check should flag this.
 
 _SESSIONS: Dict[str, str] = {}
 _ALPHABET = string.ascii_letters + string.digits
@@ -33,10 +33,7 @@ def rotate_session(session_id: str) -> str:
     user_id = _SESSIONS.get(session_id)
     if user_id is None:
         raise KeyError("Unknown session id")
-    # drop old id
     _SESSIONS.pop(session_id, None)
-    # issue a new one
     new_session_id = _generate_session_id()
     _SESSIONS[new_session_id] = user_id
     return new_session_id
-
