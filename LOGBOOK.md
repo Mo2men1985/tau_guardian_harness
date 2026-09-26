@@ -209,3 +209,55 @@ Each imported destination Git blob exactly matched its recorded source blob:
 **Status:** the full Agent Merge Gate roadmap is now canonical on `main`.
 
 **Next authorized implementation phase:** Phase 1 — Merge-Gate Core.
+
+
+---
+
+## 2026-09-26 — Phase 1 Merge-Gate Core implemented and verified
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Branch:** `product/phase1-merge-gate-core`
+
+**Phase:** 1 — Merge-Gate Core
+
+**Implemented:**
+- exact audit-target identity;
+- immutable criteria lock;
+- trusted evidence registry;
+- evidence-class and producer-origin enforcement;
+- proposition binding;
+- stale-evidence rejection;
+- untrusted criterion-evidence submission model;
+- fail-closed PASS / ABSTAIN / VETO adjudication;
+- machine-readable reason codes;
+- immutable run manifest;
+- evidence-bundle hashing and integrity checks;
+- bundle decision recomputation;
+- focused negative test suite;
+- Phase 1 technical contract documentation;
+- CI coverage expanded to scan `agent_merge_gate/`.
+
+**Verification defect found during CI hardening:**
+Ruff found a misspelled independent-review producer constant on the newly scanned path. The path had not been exercised by the original tests. The constant was corrected and a dedicated independent-review origin regression test was added before Phase 1 completion.
+
+**Verified candidate:** `94d8b90ba1175ed93b0e1b9e7494f410c2111f4b`
+
+**GitHub Actions:** run #39, run id `36225623694` — PASS.
+
+**Observed test result:** 73 passed.
+
+**Completed gates:**
+- unit and policy tests — PASS;
+- Ruff correctness gate including `agent_merge_gate/` — PASS;
+- Bandit medium/high gate including `agent_merge_gate/` — PASS;
+- fixed runner image build — PASS;
+- hardened sandbox smoke test — PASS.
+
+**External repository mutations:** none.
+
+**Roadmap:** Phase 1 marked COMPLETE on this branch.
+
+**Next:** verify the roadmap/logbook head, open Phase 1 PR to `main`, run PR CI, and merge only if the exact PR head remains green.

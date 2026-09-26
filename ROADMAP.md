@@ -56,6 +56,8 @@ The existing foundation must remain green before later phases may be treated as 
 
 # Phase 1 — Merge-Gate Core
 
+**Status: COMPLETE**
+
 Build the product-neutral engine that accepts an exact candidate change and produces an evidence-backed verdict.
 
 ## Core objects
@@ -101,6 +103,15 @@ A candidate must not PASS when any required condition is unresolved, including:
 ### Exit gate
 
 Unit and negative tests demonstrate there is no accepted path from missing or stale evidence to PASS.
+
+**Completion evidence (2026-09-26):**
+- Phase 1 core implemented under `agent_merge_gate/`;
+- focused and repository test suite: 73 passed on GitHub Actions run #39;
+- Ruff correctness gate: PASS;
+- Bandit medium/high gate: PASS;
+- fixed runner image build: PASS;
+- hardened sandbox smoke test: PASS;
+- CI expansion exposed one independent-review path typo, which was fixed and regression-tested before completion.
 
 ---
 
