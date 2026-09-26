@@ -119,3 +119,38 @@ Each imported destination Git blob exactly matched its recorded source blob:
 **Status:** foundation is suitable for merge into `main`.
 
 **Logging note:** this entry records the substantive actions and their verification. The commit that appends a log entry is itself tracked by Git history; CI generated solely by that append is tracked by GitHub Actions and can be referenced by the next substantive entry, avoiding recursive log-only commits.
+
+
+---
+
+## 2026-09-26 — Foundation merged into canonical main
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Pull request:** #23 — `Establish Agent Merge Gate source registry and action logbook`
+
+**Verified PR head:** `86cf8157bb1f96af3da1c4919f8904e39edafbef`
+
+**Pre-merge verification:**
+- branch push CI run #20 — PASS;
+- pull-request CI run #21 — PASS.
+
+**Merge method:** squash
+
+**Canonical main commit:** `8220bc95c8452bdb3e59bfd26aeb9f7c02d7b690`
+
+**Post-merge GitHub Actions:** Evidence Gate CI run #22, run id `36224211169` — PASS.
+
+**Post-merge completed gates:**
+- dependency installation — PASS;
+- unit and policy tests — PASS;
+- correctness-class Ruff gate — PASS;
+- Bandit medium/high gate — PASS;
+- fixed runner image build — PASS;
+- hardened sandbox smoke test — PASS.
+
+**External repository mutations:** none.
+
+**Canonical project state:** `main` now contains the source-of-truth file, append-only logbook, V0 product charter, provenance-preserving sanitized imports, and CI coverage for ongoing `product/**` branches.
+
+**Next authorized product step:** implement the first Agent Merge Gate V0 product modules and seeded-defect validation fixtures in this repository only.
