@@ -17,6 +17,7 @@ from .common import (
 )
 from .criteria import CriteriaLock, Criterion
 from .evidence import EvidenceRecord, EvidenceRegistry
+from .deterministic_evidence import collect_deterministic_evidence, verdict_exit_code
 from .intake import ChangedFile, GitIntake, build_git_intake
 from .submission import AuditSubmission, CriterionEvidence
 from .target import AuditTarget
@@ -42,6 +43,8 @@ __all__ = [
     "EvidenceBundle",
     "EvidenceRecord",
     "EvidenceRegistry",
+    "collect_deterministic_evidence",
+    "verdict_exit_code",
     "ChangedFile",
     "GitIntake",
     "MergeGateError",
