@@ -261,3 +261,42 @@ Ruff found a misspelled independent-review producer constant on the newly scanne
 **Roadmap:** Phase 1 marked COMPLETE on this branch.
 
 **Next:** verify the roadmap/logbook head, open Phase 1 PR to `main`, run PR CI, and merge only if the exact PR head remains green.
+
+
+---
+
+## 2026-09-26 — Phase 1 merged into canonical main
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Pull request:** #25 — `Implement Phase 1 evidence-bound merge-gate core`
+
+**Verified PR head:** `ff7be5e3140b72fc92b49ab4763020bbc5ba1e67`
+
+**Pre-merge verification:**
+- corrected implementation run #39 — PASS, 73 tests passed;
+- exact branch-head run #41 — PASS;
+- pull-request run #42, run id `36225756932` — PASS.
+
+**Merge method:** squash
+
+**Phase 1 merge commit:** `09ecc20ce0b633ee8f0dca587deac08d01aabf29`
+
+**Post-merge GitHub Actions:** run #43, run id `36225796476` — PASS.
+
+**Post-merge completed gates:**
+- unit and policy tests — PASS;
+- Ruff correctness gate including `agent_merge_gate/` — PASS;
+- Bandit medium/high gate including `agent_merge_gate/` — PASS;
+- fixed runner image build — PASS;
+- hardened sandbox smoke test — PASS.
+
+**Material defect discovered during implementation:** when CI coverage was widened to the new package, Ruff exposed a misspelled independent-review producer constant in an otherwise unexercised path. The defect was fixed and a dedicated regression test was added before merge. Failed intermediate CI runs remain in GitHub Actions history as part of the evidence trail.
+
+**Canonical Phase 1 status:** IMPLEMENTED + TESTED + CI VERIFIED.
+
+**Not established:** independent external audit, seeded-defect benchmark performance, real-repository performance, hosted-service readiness, deployment, or production proof.
+
+**External repository mutations:** none.
+
+**Next canonical roadmap phase:** Phase 2 — Git / PR Intake.
