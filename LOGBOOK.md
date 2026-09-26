@@ -181,3 +181,31 @@ Each imported destination Git blob exactly matched its recorded source blob:
 **Verification status:** CI pending at the time of this entry.
 
 **Next:** verify the exact roadmap branch with CI and merge into `main`.
+
+
+---
+
+## 2026-09-26 — Canonical roadmap merged into main
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Pull request:** #24 — `Add canonical Agent Merge Gate full roadmap`
+
+**Verified PR head:** `c35d4b3a566bf8e6df4282a667c75eae998014e4`
+
+**Verification before merge:**
+- branch CI run #25 — PASS;
+- branch CI run #26 — PASS;
+- pull-request CI run #27 — PASS.
+
+**Merge method:** squash
+
+**Roadmap merge commit:** `740f9199f9bd8940da7a3376f19c105203f5f522`
+
+**Canonical artifact:** `ROADMAP.md`
+
+**External repository mutations:** none.
+
+**Status:** the full Agent Merge Gate roadmap is now canonical on `main`.
+
+**Next authorized implementation phase:** Phase 1 — Merge-Gate Core.
