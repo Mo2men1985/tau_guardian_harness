@@ -181,6 +181,8 @@ This establishes deterministic Git/PR intake for the current same-repository Git
 
 # Phase 3 — Deterministic Evidence Layer
 
+**Status: IN PROGRESS**
+
 Expand Guardian Evidence Gate into the PR evidence collector.
 
 ## Python-first evidence

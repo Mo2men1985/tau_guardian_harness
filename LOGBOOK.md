@@ -547,3 +547,89 @@ The outer ZIP artifact digests differed because workflow artifact archives conta
 **Not established:** forked-PR compatibility across all GitHub topologies, broad monorepo discovery, deterministic evidence collection, semantic auditing, defect-detection advantage, deployment, or production proof.
 
 **Next canonical roadmap phase:** Phase 3 — deterministic evidence vertical slice from the exact PR candidate into a real Evidence Bundle and verdict.
+
+
+---
+
+## 2026-09-26 — Phase 3 deterministic evidence implementation started
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Branch:** `product/phase3-deterministic-evidence`
+
+**Starting main commit:** `b80ad00d04cbd3ce7db28e5be9d31afcf74c88d6`
+
+**Production objective:** make one real pull request flow from exact Git identity through isolated deterministic execution into trusted Phase-1 evidence, a hash-bound Evidence Bundle, and an enforceable PASS / ABSTAIN / VETO verdict.
+
+**Implemented on branch:**
+- exact-candidate materialization via `git archive`;
+- safe archive extraction rejecting traversal, links, and special members;
+- fixed non-root Docker runner with pinned pytest/Ruff/Bandit/PyYAML/defusedxml tooling and Git;
+- network-disabled, read-only, capability-dropped candidate execution;
+- dedicated ephemeral JUnit evidence mount;
+- explicit pytest policy targeting `tests/` and overriding candidate `addopts`;
+- isolated Ruff correctness rules independent of candidate configuration;
+- structured Bandit collection with medium/high severity+confidence blocking policy;
+- candidate-bound deterministic `EvidenceRecord` construction;
+- dynamic minimal locked criteria for applicable evidence;
+- Phase-1 Evidence Bundle creation and verdict mapping;
+- raw intake/JUnit/stdout/Ruff/Bandit/execution/bundle artifact retention;
+- PR workflow upload before verdict enforcement;
+- unit/integration tests for exact Git snapshot materialization and evidence semantics;
+- `docs/PHASE3_DETERMINISTIC_EVIDENCE.md`.
+
+**Important trust limitation:** this repository dogfoods its own workflow and runner-image definition. That is useful controlled end-to-end evidence, but it is not proof of safe orchestration for arbitrary customer-controlled repositories. A hosted production service must keep orchestration and trusted runner images outside candidate control.
+
+**External repository mutations:** none.
+
+**Phase status:** IN PROGRESS.
+
+**Completion condition:** a real PR must execute the exact candidate in the hardened runner, retain real structured artifacts, create a candidate-bound Evidence Bundle, produce an adjudicated verdict, and demonstrate materially reproducible evidence on rerun.
+
+
+---
+
+## 2026-09-26 — Phase 3 first real PR evidence exposed incomplete static-tool transport
+
+**Actor:** ChatGPT / evidence-gate execution
+
+**Pull request:** #30 — `Implement Phase 3 deterministic evidence vertical slice`
+
+**First real PR candidate:** `01e18b7110f5a2eebdeec8f79846ac2c4d39b9fd`
+
+**Observed evidence:**
+- exact candidate executed in the fixed isolated runner;
+- pytest: 91 collected / 91 passed / 0 failed / 0 errors;
+- pytest criterion: PASS;
+- Ruff criterion: ABSTAIN;
+- Bandit criterion: ABSTAIN;
+- overall verdict: ABSTAIN.
+
+**Root causes:**
+1. Ruff attempted to initialize its cache under the read-only candidate workspace, causing exit code 2 and incomplete structured evidence.
+2. Bandit emitted diagnostic warnings on stderr, but the generic runner merged stderr into stdout, contaminating the JSON artifact and making parsing fail.
+
+**Response:** the policy was not weakened and the ABSTAIN was not converted manually.
+
+**Remediation:**
+- moved Ruff cache to isolated container tmpfs;
+- separated structured-tool stdout and stderr;
+- retained stderr as its own hashed artifact;
+- moved pytest cache to tmpfs;
+- reran the same real PR path.
+
+**Corrected evidence on later candidate `edaddb15dfd25c3a8895b8c8a7e669babc2e74b9`:**
+- pytest: 91/91 PASS;
+- Ruff: valid structured JSON, 0 findings, criterion PASS;
+- Bandit: valid structured JSON, 8 low-severity findings, 0 blocking findings, criterion PASS;
+- overall deterministic Evidence Bundle verdict: PASS.
+
+**Reproducibility observation:** two independent executions of that exact candidate produced the same candidate/diff/archive identity, test counts, tool versions, Ruff findings, Bandit findings/blocking set, criteria decisions, and overall PASS, but exact bundle hashes differed due run-local image IDs, timings and timestamp-bearing artifacts.
+
+**Follow-up:** a separate semantic evidence fingerprint was added so substantive reproducibility is measured without discarding exact per-run provenance.
+
+**External repository mutations:** none.
+
+**Phase status:** IN PROGRESS pending final exact-head PASS and matching semantic fingerprints across independent reruns.
