@@ -23,9 +23,13 @@ def _run(cmd: List[str], cwd: Optional[Path] = None, input_text: Optional[str] =
     return subprocess.run(cmd, cwd=cwd, input=input_text, text=True, capture_output=True, check=False)
 
 
-def _load_dataset_index(dataset_name: str, split: str) -> Dict[str, Dict[str, Any]]:
+def _load_dataset_index(
+    dataset_name: str,
+    split: str,
+    revision: str,
+) -> Dict[str, Dict[str, Any]]:
     from datasets import load_dataset
-    ds = load_dataset(dataset_name, split=split)
+    ds = load_dataset(dataset_name, split=split, revision=revision)
     return {
         str(row["instance_id"]): {"repo": row.get("repo"), "base_commit": row.get("base_commit")}
         for row in ds if row.get("instance_id")
@@ -131,12 +135,17 @@ def main() -> None:
     parser.add_argument("--preds", required=True)
     parser.add_argument("--dataset", default="princeton-nlp/SWE-bench_Lite")
     parser.add_argument("--split", default="test")
+    parser.add_argument(
+        "--dataset-revision",
+        required=True,
+        help="Exact dataset revision/commit to prevent unpinned remote code or data changes.",
+    )
     parser.add_argument("--outdir", required=True)
     parser.add_argument("--repo-cache-dir", default=".guardian_repo_cache")
     args = parser.parse_args()
 
     predictions = _load_predictions(Path(args.preds))
-    index = _load_dataset_index(args.dataset, args.split)
+    index = _load_dataset_index(args.dataset, args.split, args.dataset_revision)
     outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
     cache = Path(args.repo_cache_dir); worktrees = cache / "worktrees"; worktrees.mkdir(parents=True, exist_ok=True)
     for rec in predictions:
