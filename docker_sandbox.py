@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 import time
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -84,7 +84,7 @@ def run_tests_in_sandbox(
             "--memory", os.getenv("GUARDIAN_MEMORY_LIMIT", "1g"),
             "--cpus", os.getenv("GUARDIAN_CPU_LIMIT", "1.0"),
             "--user", os.getenv("GUARDIAN_CONTAINER_USER", "65534:65534"),
-            "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",
+            "--tmpfs", "/tmp:rw,noexec,nosuid,size=128m",  # nosec B108 - container tmpfs, not a host temp path
             "-v", f"{project_root_path}:/workspace:ro",
             "-v", f"{tmp_path}:/evidence:rw",
             "-w", "/workspace",
