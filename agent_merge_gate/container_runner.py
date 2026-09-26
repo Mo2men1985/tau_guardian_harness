@@ -307,16 +307,27 @@ def run_pytest(
     image: str = DEFAULT_IMAGE,
     timeout: int = 180,
 ) -> PytestContainerResult:
-    """Run the repository tests without a writable host evidence mount.
-
-    The candidate source is read-only. JUnit is written into the container's
-    isolated tmpfs, copied out after execution, and the container is removed.
-    """
-    with tempfile.TemporaryDirectory(prefix="amg-pytest-") as tmp:
-        cidfile = Path(tmp) / "cid"
-        create_command = [
+    """Run repository tests with source read-only and evidence narrowly writable."""
+    with tempfile.TemporaryDirectory(prefix="amg-pytest-evidence-") as tmp:
+        evidence_dir = Path(tmp)
+        # Dedicated ephemeral evidence directory; only this directory is writable
+        # from the container. It contains no source, credentials, or host state.
+        evidence_dir.chmod(0o777)  # nosec B103
+        junit_path = evidence_dir / "pytest.xml"
+        tool_command = [
+            "python",
+            "-m",
+            "pytest",
+            "-q",
+            "-o",
+            "addopts=",
+            "tests",
+            "--junitxml=/evidence/pytest.xml",
+        ]
+        command = [
             "docker",
-            "create",
+            "run",
+            "--rm",
             "--network",
             "none",
             "--read-only",
@@ -342,115 +353,38 @@ def run_pytest(
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
             "-v",
             f"{snapshot}:/workspace:ro",
+            "-v",
+            f"{evidence_dir}:/evidence:rw",
             "-w",
             "/workspace",
-            "--cidfile",
-            str(cidfile),
             image,
-            "python",
-            "-m",
-            "pytest",
-            "-q",
-            "-o",
-            "addopts=",
-            "tests",
-            "--junitxml=/tmp/pytest.xml",
+            *tool_command,
         ]
+
         started = time.monotonic()
         try:
-            created = subprocess.run(
-                create_command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                check=False,
-                timeout=30,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
-            message = "Docker unavailable" if isinstance(exc, FileNotFoundError) else "docker create timed out"
-            return PytestContainerResult(
-                command=tuple(create_command),
-                exit_code=127 if isinstance(exc, FileNotFoundError) else 124,
-                completed=False,
-                timed_out=isinstance(exc, subprocess.TimeoutExpired),
-                duration_ms=int((time.monotonic() - started) * 1000),
-                collected=0,
-                passed=0,
-                failed=0,
-                errors=0,
-                skipped=0,
-                junit=None,
-                junit_sha256=None,
-                stdout=str(message).encode(),
-                stdout_sha256=_sha256_bytes(str(message).encode()),
-                version=None,
-                error=message,
-            )
-
-        if created.returncode != 0 or not cidfile.exists():
-            output = created.stdout
-            return PytestContainerResult(
-                command=tuple(create_command),
-                exit_code=created.returncode,
-                completed=False,
-                timed_out=False,
-                duration_ms=int((time.monotonic() - started) * 1000),
-                collected=0,
-                passed=0,
-                failed=0,
-                errors=0,
-                skipped=0,
-                junit=None,
-                junit_sha256=None,
-                stdout=output,
-                stdout_sha256=_sha256_bytes(output),
-                version=None,
-                error="docker create failed",
-            )
-
-        cid = cidfile.read_text(encoding="utf-8").strip()
-        start_command = ["docker", "start", "-a", cid]
-        timed_out = False
-        try:
             proc = subprocess.run(
-                start_command,
+                command,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 check=False,
                 timeout=timeout,
             )
             stdout = proc.stdout
-            exit_code = proc.returncode
+            exit_code: int | None = proc.returncode
+            timed_out = False
         except subprocess.TimeoutExpired as exc:
             stdout = exc.stdout if isinstance(exc.stdout, bytes) else b""
             exit_code = 124
             timed_out = True
-            subprocess.run(
-                ["docker", "kill", cid],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-                timeout=10,
-            )
+        except FileNotFoundError:
+            stdout = b"docker executable not found"
+            exit_code = 127
+            timed_out = False
 
-        junit_path = Path(tmp) / "pytest.xml"
-        copy_proc = subprocess.run(
-            ["docker", "cp", f"{cid}:/tmp/pytest.xml", str(junit_path)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-            timeout=30,
-        )
-        subprocess.run(
-            ["docker", "rm", "-f", cid],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=15,
-        )
-
-        junit = junit_path.read_bytes() if copy_proc.returncode == 0 and junit_path.exists() else None
+        junit = junit_path.read_bytes() if junit_path.exists() else None
         collected = passed = failed = errors = skipped = 0
-        completed = not timed_out and junit is not None
+        completed = not timed_out and exit_code != 127 and junit is not None
         error = None
         if completed and junit is not None:
             try:
@@ -460,12 +394,14 @@ def run_pytest(
                 error = f"invalid JUnit XML: {exc}"
         elif timed_out:
             error = f"pytest timed out after {timeout}s"
+        elif exit_code == 127:
+            error = "Docker unavailable"
         else:
             error = "pytest did not produce retrievable JUnit XML"
 
         version = _tool_version(snapshot, image, ["python", "-m", "pytest", "--version"])
         return PytestContainerResult(
-            command=tuple(create_command[-7:]),
+            command=tuple(tool_command),
             exit_code=exit_code,
             completed=completed,
             timed_out=timed_out,
