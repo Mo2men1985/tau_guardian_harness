@@ -8,7 +8,10 @@ FORBIDDEN = [
     re.compile(r"\btau\b", re.IGNORECASE),
     re.compile(r"tau_", re.IGNORECASE),
 ]
-TEXT_SUFFIXES = {".py", ".md", ".txt", ".json", ".jsonl", ".yml", ".yaml"}
+TEXT_SUFFIXES = {".py", ".md", ".txt", ".json", ".jsonl", ".yml", ".yaml", ".html"}
+# The public repository slug predates this migration and is an identifier, not an
+# active metric/concept. Links may contain it until the repository itself is renamed.
+HISTORICAL_REPOSITORY_SLUG = "tau_guardian_harness"
 
 
 def test_retired_concepts_do_not_reappear_in_active_text():
@@ -22,6 +25,7 @@ def test_retired_concepts_do_not_reappear_in_active_text():
         if path.name == "test_no_retired_concepts.py":
             continue
         text = path.read_text(encoding="utf-8", errors="ignore")
+        text = text.replace(HISTORICAL_REPOSITORY_SLUG, "HISTORICAL_REPOSITORY_SLUG")
         for pattern in FORBIDDEN:
             if pattern.search(text):
                 offenders.append(f"{path.relative_to(root)} -> {pattern.pattern}")
