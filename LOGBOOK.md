@@ -587,3 +587,49 @@ The outer ZIP artifact digests differed because workflow artifact archives conta
 **Phase status:** IN PROGRESS.
 
 **Completion condition:** a real PR must execute the exact candidate in the hardened runner, retain real structured artifacts, create a candidate-bound Evidence Bundle, produce an adjudicated verdict, and demonstrate materially reproducible evidence on rerun.
+
+
+---
+
+## 2026-09-26 — Phase 3 first real PR evidence exposed incomplete static-tool transport
+
+**Actor:** ChatGPT / evidence-gate execution
+
+**Pull request:** #30 — `Implement Phase 3 deterministic evidence vertical slice`
+
+**First real PR candidate:** `01e18b7110f5a2eebdeec8f79846ac2c4d39b9fd`
+
+**Observed evidence:**
+- exact candidate executed in the fixed isolated runner;
+- pytest: 91 collected / 91 passed / 0 failed / 0 errors;
+- pytest criterion: PASS;
+- Ruff criterion: ABSTAIN;
+- Bandit criterion: ABSTAIN;
+- overall verdict: ABSTAIN.
+
+**Root causes:**
+1. Ruff attempted to initialize its cache under the read-only candidate workspace, causing exit code 2 and incomplete structured evidence.
+2. Bandit emitted diagnostic warnings on stderr, but the generic runner merged stderr into stdout, contaminating the JSON artifact and making parsing fail.
+
+**Response:** the policy was not weakened and the ABSTAIN was not converted manually.
+
+**Remediation:**
+- moved Ruff cache to isolated container tmpfs;
+- separated structured-tool stdout and stderr;
+- retained stderr as its own hashed artifact;
+- moved pytest cache to tmpfs;
+- reran the same real PR path.
+
+**Corrected evidence on later candidate `edaddb15dfd25c3a8895b8c8a7e669babc2e74b9`:**
+- pytest: 91/91 PASS;
+- Ruff: valid structured JSON, 0 findings, criterion PASS;
+- Bandit: valid structured JSON, 8 low-severity findings, 0 blocking findings, criterion PASS;
+- overall deterministic Evidence Bundle verdict: PASS.
+
+**Reproducibility observation:** two independent executions of that exact candidate produced the same candidate/diff/archive identity, test counts, tool versions, Ruff findings, Bandit findings/blocking set, criteria decisions, and overall PASS, but exact bundle hashes differed due run-local image IDs, timings and timestamp-bearing artifacts.
+
+**Follow-up:** a separate semantic evidence fingerprint was added so substantive reproducibility is measured without discarding exact per-run provenance.
+
+**External repository mutations:** none.
+
+**Phase status:** IN PROGRESS pending final exact-head PASS and matching semantic fingerprints across independent reruns.
