@@ -7,6 +7,8 @@ from agent_merge_gate import (
     AGENT,
     AGENT_ASSERTION,
     DETERMINISTIC,
+    INDEPENDENT_REVIEW,
+    INDEPENDENT_REVIEWER,
     PASS,
     PRIMARY_STATE,
     TRUSTED_SYSTEM,
@@ -266,3 +268,29 @@ def test_frozen_target_cannot_be_mutated():
     target = make_target()
     with pytest.raises(FrozenInstanceError):
         target.candidate_sha = BASE_SHA
+
+
+def test_independent_review_record_requires_independent_reviewer_origin():
+    record = EvidenceRecord(
+        "review-1",
+        INDEPENDENT_REVIEW,
+        "semantic-review",
+        CANDIDATE_SHA,
+        INDEPENDENT_REVIEWER,
+        "reviewer",
+        True,
+        True,
+    )
+    assert record.evidence_class == INDEPENDENT_REVIEW
+
+    with pytest.raises(MergeGateError):
+        EvidenceRecord(
+            "review-2",
+            INDEPENDENT_REVIEW,
+            "semantic-review",
+            CANDIDATE_SHA,
+            AGENT,
+            "generator",
+            True,
+            True,
+        )
