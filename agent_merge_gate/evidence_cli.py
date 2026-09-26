@@ -37,6 +37,7 @@ def main() -> int:
         "decision": bundle.decision.decision,
         "reason_codes": list(bundle.decision.reason_codes),
         "bundle_sha256": bundle.bundle_sha256,
+        "semantic_fingerprint_sha256": execution["semantic_fingerprint_sha256"],
         "runner_image_id": execution["runner_image_id"],
     }
     print(json.dumps(summary, sort_keys=True))
