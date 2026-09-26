@@ -58,10 +58,11 @@ If an activity increases test counts or internal complexity without materially i
 
 ## Current canonical base
 
-- Baseline branch at project start: `main`
-- Baseline commit: `266e67db4d87ccecc3ff24e446a627c080c50e80`
-- Working branch: `product/agent-merge-gate-v0`
+- Canonical branch: `main`
+- Baseline commit at project start: `266e67db4d87ccecc3ff24e446a627c080c50e80`
+- Implementation work occurs on short-lived `product/**` branches and is merged to `main` only after evidence gates pass.
 - Foundation date: 2026-09-26
+- Branch-protection status: repository administration write access is not available through the connected GitHub capability. Protection of `main` and required-status-check enforcement remain an explicit repository-administration action; until enabled, process discipline rather than GitHub branch rules prevents direct bypass.
 
 ## Repository mutation boundary
 

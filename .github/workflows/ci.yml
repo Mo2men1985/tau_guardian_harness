@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -21,6 +23,25 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
       - name: Unit and policy tests
         run: python -m pytest -q
+      - name: Normalize real pull request intake
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          python -m agent_merge_gate.intake_cli
+          --repository "$GITHUB_REPOSITORY"
+          --repo-path .
+          --base "$PR_BASE_SHA"
+          --candidate "$PR_HEAD_SHA"
+          --output phase2_reports/pr-intake.json
+      - name: Upload pull request intake evidence
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-pr-intake
+          path: phase2_reports/pr-intake.json
+          if-no-files-found: error
       - name: Targeted Phase 1 mutation gate
         run: python tools/mutation_test_phase1.py --json-out mutation_reports/phase1.json
       - name: Upload mutation evidence

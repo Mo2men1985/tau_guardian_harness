@@ -438,3 +438,57 @@ Observed corrected result:
 **External repository mutations:** none.
 
 **Next:** merge this doctrine into canonical `main` and apply it to every subsequent phase.
+
+
+---
+
+## 2026-09-26 — Phase 2 real Git intake implementation
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Branch:** `product/phase2-real-pr-intake`
+
+**Starting main commit:** `ef47a04f154641e5574a770e891325bb365e28bc`
+
+**Production objective:** establish the first real vertical slice from an actual Git candidate into the Phase-1 audit-target identity. The target is real repository behavior, not an isolated parser or an increased test count.
+
+**Implemented:**
+- exact Git ref-to-commit resolution;
+- PR-style merge-base calculation;
+- deterministic binary-capable full-index diff hashing;
+- real changed-file inventory from Git;
+- exact candidate-tree inventory;
+- changed-file language detection;
+- candidate dependency-manifest inventory;
+- root framework detection for initial Python/JavaScript cases;
+- migration, infrastructure and security-sensitive path detection;
+- deterministic change classification;
+- non-executing test-command discovery;
+- direct construction of the Phase-1 `AuditTarget`;
+- canonical JSON intake artifact with no timestamps;
+- CLI for real repository execution;
+- real Git integration tests using actual temporary Git repositories, commits and diverged base/head histories;
+- GitHub Actions full-history checkout;
+- pull-request-only normalization of exact GitHub base/head SHAs;
+- upload of `phase2-pr-intake` machine-readable evidence artifact.
+
+**Branch verification:** GitHub Actions run #72, run id `36227195301` — PASS.
+
+**Observed repository test result:** 81 passed on the Phase-2 branch.
+
+**Phase-1 mutation regression gate:** 18/18 targeted semantic mutants killed.
+
+**Governance corrections:**
+- removed stale working-branch metadata from `SOURCE_OF_TRUTH.md`;
+- updated the immediate roadmap step from Phase 1 to Phase 2;
+- documented that `main` branch protection remains disabled.
+
+**Branch-protection limitation:** the connected GitHub capability does not expose repository-administration write access, so branch protection / required-status-check enforcement could not be enabled from this session. This remains an explicit governance gap rather than being represented as fixed.
+
+**External repository mutations:** none.
+
+**Phase status:** IN PROGRESS.
+
+**Next:** open the Phase-2 pull request. That PR itself must be processed by the new real-PR intake step, producing a machine-readable artifact bound to its exact base/head commits. Phase 2 will not be called complete until that real PR path is verified.

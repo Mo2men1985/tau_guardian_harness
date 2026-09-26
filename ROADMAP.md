@@ -737,17 +737,18 @@ Evidence must be bound to the exact candidate/version it supports.
 
 The next authorized product phase is:
 
-## Phase 1 — Merge-Gate Core
+## Phase 2 — Git / PR Intake
 
-The first implementation work should establish:
+The first production-value milestone is a thin real vertical slice, not an isolated parser:
 
-1. exact audit-target identity;
-2. criteria-lock schema;
-3. trusted evidence-registry schema;
-4. evidence admissibility and proposition binding;
-5. fail-closed adjudication;
-6. immutable run manifest;
-7. evidence-bundle schema;
-8. negative tests proving incomplete/stale/mismatched evidence cannot PASS.
+1. resolve a real repository base and candidate to exact commits;
+2. compute the PR merge-base and deterministic binary-capable diff hash;
+3. inventory real changed files, languages, manifests, migrations, infrastructure and security-sensitive paths;
+4. classify the change deterministically;
+5. emit a Phase-1 `AuditTarget` bound to the exact candidate and diff;
+6. run the intake on the actual pull request introducing Phase 2 and retain its machine-readable artifact;
+7. immediately connect the normalized target to real deterministic evidence collection rather than polishing abstractions in isolation.
 
-No SaaS, dashboard, hosted service, billing, or broad integration work is required before the benchmark path is functioning.
+Phase 2 is not complete merely because unit tests pass. Its meaningful exit evidence is that the same exact real PR produces the same normalized intake and candidate identity on rerun.
+
+No SaaS, dashboard, billing, or broad hosted-service work is required before this real vertical slice and early benchmark path function.
