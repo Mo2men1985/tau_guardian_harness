@@ -106,7 +106,9 @@ Unit and negative tests demonstrate there is no accepted path from missing or st
 
 **Completion evidence (2026-09-26):**
 - Phase 1 core implemented under `agent_merge_gate/`;
-- focused and repository test suite: 73 passed on GitHub Actions run #39;
+- repository test suite after mutation hardening: 77 passed;
+- targeted semantic mutation gate: 18/18 mutants killed, 0 survived;
+- mutation report is emitted as a CI artifact;
 - Ruff correctness gate: PASS;
 - Bandit medium/high gate: PASS;
 - fixed runner image build: PASS;
