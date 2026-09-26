@@ -1,2 +1,1 @@
-# tau_guardian harness code package
-
+# Guardian Evidence Gate task fixtures
