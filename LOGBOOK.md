@@ -547,3 +547,43 @@ The outer ZIP artifact digests differed because workflow artifact archives conta
 **Not established:** forked-PR compatibility across all GitHub topologies, broad monorepo discovery, deterministic evidence collection, semantic auditing, defect-detection advantage, deployment, or production proof.
 
 **Next canonical roadmap phase:** Phase 3 — deterministic evidence vertical slice from the exact PR candidate into a real Evidence Bundle and verdict.
+
+
+---
+
+## 2026-09-26 — Phase 3 deterministic evidence implementation started
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Branch:** `product/phase3-deterministic-evidence`
+
+**Starting main commit:** `b80ad00d04cbd3ce7db28e5be9d31afcf74c88d6`
+
+**Production objective:** make one real pull request flow from exact Git identity through isolated deterministic execution into trusted Phase-1 evidence, a hash-bound Evidence Bundle, and an enforceable PASS / ABSTAIN / VETO verdict.
+
+**Implemented on branch:**
+- exact-candidate materialization via `git archive`;
+- safe archive extraction rejecting traversal, links, and special members;
+- fixed non-root Docker runner with pinned pytest/Ruff/Bandit/PyYAML/defusedxml tooling and Git;
+- network-disabled, read-only, capability-dropped candidate execution;
+- dedicated ephemeral JUnit evidence mount;
+- explicit pytest policy targeting `tests/` and overriding candidate `addopts`;
+- isolated Ruff correctness rules independent of candidate configuration;
+- structured Bandit collection with medium/high severity+confidence blocking policy;
+- candidate-bound deterministic `EvidenceRecord` construction;
+- dynamic minimal locked criteria for applicable evidence;
+- Phase-1 Evidence Bundle creation and verdict mapping;
+- raw intake/JUnit/stdout/Ruff/Bandit/execution/bundle artifact retention;
+- PR workflow upload before verdict enforcement;
+- unit/integration tests for exact Git snapshot materialization and evidence semantics;
+- `docs/PHASE3_DETERMINISTIC_EVIDENCE.md`.
+
+**Important trust limitation:** this repository dogfoods its own workflow and runner-image definition. That is useful controlled end-to-end evidence, but it is not proof of safe orchestration for arbitrary customer-controlled repositories. A hosted production service must keep orchestration and trusted runner images outside candidate control.
+
+**External repository mutations:** none.
+
+**Phase status:** IN PROGRESS.
+
+**Completion condition:** a real PR must execute the exact candidate in the hardened runner, retain real structured artifacts, create a candidate-bound Evidence Bundle, produce an adjudicated verdict, and demonstrate materially reproducible evidence on rerun.
