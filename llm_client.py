@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import time
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Dict, Literal, Optional, Protocol, Tuple, runtime_checkable
@@ -127,6 +128,11 @@ class OllamaClient:
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
         self.base_url = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
+        parsed = urllib.parse.urlparse(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise LLMError("OLLAMA_BASE_URL must use http(s) and include a hostname")
+        if parsed.username or parsed.password:
+            raise LLMError("OLLAMA_BASE_URL must not embed credentials")
 
     def generate(self, prompt: str) -> Tuple[str, Dict[str, Any]]:
         body = json.dumps({
@@ -145,7 +151,8 @@ class OllamaClient:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=300) as response:
+            # The base URL is scheme/host validated in __init__.
+            with urllib.request.urlopen(request, timeout=300) as response:  # nosec B310
                 payload = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
             raise LLMError(f"Ollama request failed: {exc}") from exc
