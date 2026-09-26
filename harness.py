@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
@@ -190,7 +190,7 @@ def run_shell_command(
 def _pytest_counts_from_junit(path: Path) -> Tuple[int, int, int, int, int]:
     """Return collected, passed, failed, errors, skipped from JUnit XML."""
     root = ET.parse(path).getroot()
-    suites: Iterable[ET.Element]
+    suites: Iterable[Any]
     if root.tag == "testsuite":
         suites = [root]
     else:
