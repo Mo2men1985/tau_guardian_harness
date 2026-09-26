@@ -327,9 +327,11 @@ def collect_deterministic_evidence(
 
         ruff_result = run_ruff(snapshot, all_python, image=image)
         _write_bytes(output / "ruff.json", ruff_result.stdout)
+        _write_bytes(output / "ruff.stderr.txt", ruff_result.stderr)
 
         bandit_result = run_bandit(snapshot, production_python, image=image)
         _write_bytes(output / "bandit.json", bandit_result.stdout)
+        _write_bytes(output / "bandit.stderr.txt", bandit_result.stderr)
 
     records: list[EvidenceRecord] = [
         _pytest_record(pytest_result, intake.audit_target.candidate_sha, runner_id)
