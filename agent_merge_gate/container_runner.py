@@ -46,6 +46,8 @@ class ContainerCommandResult:
     duration_ms: int
     stdout: bytes
     stdout_sha256: str
+    stderr: bytes
+    stderr_sha256: str
     version: str | None
     error: str | None
 
@@ -57,6 +59,7 @@ class ContainerCommandResult:
             "timed_out": self.timed_out,
             "duration_ms": self.duration_ms,
             "stdout_sha256": self.stdout_sha256,
+            "stderr_sha256": self.stderr_sha256,
             "version": self.version,
             "error": self.error,
         }
@@ -128,6 +131,8 @@ def _docker_base(snapshot: Path, image: str) -> list[str]:
         "PYTHONDONTWRITEBYTECODE=1",
         "-e",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+        "-e",
+        "RUFF_CACHE_DIR=/tmp/ruff-cache",
         "-v",
         f"{snapshot}:/workspace:ro",
         "-w",
@@ -179,23 +184,26 @@ def _run_command(
         proc = subprocess.run(
             command,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             check=False,
             timeout=timeout,
         )
         stdout = proc.stdout
+        stderr = proc.stderr
         exit_code: int | None = proc.returncode
         timed_out = False
         completed = proc.returncode in acceptable_exit_codes
         error = None if completed else f"container command exited with {proc.returncode}"
     except subprocess.TimeoutExpired as exc:
         stdout = exc.stdout if isinstance(exc.stdout, bytes) else b""
+        stderr = exc.stderr if isinstance(exc.stderr, bytes) else b""
         exit_code = 124
         timed_out = True
         completed = False
         error = f"container command timed out after {timeout}s"
     except FileNotFoundError:
         stdout = b"docker executable not found"
+        stderr = b""
         exit_code = 127
         timed_out = False
         completed = False
@@ -213,6 +221,8 @@ def _run_command(
         duration_ms=int((time.monotonic() - started) * 1000),
         stdout=stdout,
         stdout_sha256=_sha256_bytes(stdout),
+        stderr=stderr,
+        stderr_sha256=_sha256_bytes(stderr),
         version=version,
         error=error,
     )
@@ -234,6 +244,8 @@ def run_ruff(
             duration_ms=0,
             stdout=b"",
             stdout_sha256=_sha256_bytes(b""),
+            stderr=b"",
+            stderr_sha256=_sha256_bytes(b""),
             version=_tool_version(snapshot, image, ["ruff", "--version"]),
             error="no Python targets for Ruff",
         )
@@ -272,6 +284,8 @@ def run_bandit(
             duration_ms=0,
             stdout=b"",
             stdout_sha256=_sha256_bytes(b""),
+            stderr=b"",
+            stderr_sha256=_sha256_bytes(b""),
             version=_tool_version(snapshot, image, ["bandit", "--version"]),
             error="no production Python targets for Bandit",
         )
@@ -321,6 +335,8 @@ def run_pytest(
             "-q",
             "-o",
             "addopts=",
+            "-o",
+            "cache_dir=/tmp/pytest-cache",
             "tests",
             "--junitxml=/evidence/pytest.xml",
         ]
@@ -351,6 +367,8 @@ def run_pytest(
             "PYTHONDONTWRITEBYTECODE=1",
             "-e",
             "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+            "-e",
+            "RUFF_CACHE_DIR=/tmp/ruff-cache",
             "-v",
             f"{snapshot}:/workspace:ro",
             "-v",
