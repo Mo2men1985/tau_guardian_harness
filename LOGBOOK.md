@@ -492,3 +492,58 @@ Observed corrected result:
 **Phase status:** IN PROGRESS.
 
 **Next:** open the Phase-2 pull request. That PR itself must be processed by the new real-PR intake step, producing a machine-readable artifact bound to its exact base/head commits. Phase 2 will not be called complete until that real PR path is verified.
+
+
+---
+
+## 2026-09-26 — Phase 2 real Git / PR intake completed
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Pull request:** #28 — `Implement Phase 2 real Git and PR intake`
+
+**Verified final PR head:** `9e0050107b99654fa59846c1b2ae9c1e3b19e147`
+
+**GitHub base SHA:** `ef47a04f154641e5574a770e891325bb365e28bc`
+
+**Real PR intake evidence:**
+- pull-request workflow run #76, run id `36227338848` — PASS;
+- exact PR intake step — PASS;
+- machine-readable `phase2-pr-intake` artifact — generated;
+- resolved repository: `Mo2men1985/tau_guardian_harness`;
+- resolved base SHA: `ef47a04f154641e5574a770e891325bb365e28bc`;
+- resolved candidate SHA: `9e0050107b99654fa59846c1b2ae9c1e3b19e147`;
+- merge-base SHA: `ef47a04f154641e5574a770e891325bb365e28bc`;
+- canonical diff SHA-256: `033df49bb248da9835b96848e3cd66a01ecbf8449d414412719457ee98feccf6`;
+- changed files: 9;
+- classifications: `BUSINESS_LOGIC`, `INFRA`;
+- dependency manifests: `pyproject.toml`, `requirements.txt`;
+- discovered test command: `python -m pytest -q`.
+
+**Determinism rerun:** the same exact PR head was rerun as workflow attempt 2.
+
+The two independently produced internal `pr-intake.json` files were byte-identical.
+
+**Canonical intake JSON SHA-256:** `851caaf2db746fd097eb572b44292b8ece933f6fb9c8a4b36868818579d50093`
+
+The outer ZIP artifact digests differed because workflow artifact archives contain packaging metadata; determinism was evaluated on the canonical JSON payload itself, not the ZIP wrapper.
+
+**Repository test result on Phase-2 implementation:** 81 passed.
+
+**Phase-1 targeted mutation regression:** 18/18 killed, 0 survived.
+
+**Merge method:** squash
+
+**Phase-2 merge commit:** `bedf14d49171a72e7b3c83acfd2200b890e0617e`
+
+**Post-merge GitHub Actions:** run #77 — PASS.
+
+**Governance limitation retained:** `main` branch protection remains disabled because repository-administration write access is unavailable through the connected GitHub capability. This is not considered resolved.
+
+**External repository mutations:** none.
+
+**Canonical Phase 2 status:** IMPLEMENTED + REAL-GIT INTEGRATION TESTED + REAL-PR VERIFIED + DETERMINISM VERIFIED + CI VERIFIED.
+
+**Not established:** forked-PR compatibility across all GitHub topologies, broad monorepo discovery, deterministic evidence collection, semantic auditing, defect-detection advantage, deployment, or production proof.
+
+**Next canonical roadmap phase:** Phase 3 — deterministic evidence vertical slice from the exact PR candidate into a real Evidence Bundle and verdict.
