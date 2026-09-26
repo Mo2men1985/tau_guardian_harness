@@ -365,3 +365,52 @@ Observed corrected result:
 **External repository mutations:** none.
 
 **Next:** verify the exact documentation/logbook branch head, open a hardening PR, run PR CI, and merge only if the mutation gate remains green.
+
+
+---
+
+## 2026-09-26 — Phase 1 mutation hardening merged into canonical main
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Pull request:** #26 — `Harden Phase 1 with semantic mutation testing`
+
+**Verified PR head:** `b9a72e5b522beca0d56a0390b6d3716b17bce8c2`
+
+**Mutation-hardening evidence before merge:**
+- first enforced mutation run #47 — FAILED by design;
+- first-run mutation result: 14 killed / 5 survived / 0 specification errors;
+- four survivors were genuine bundle-integrity test gaps;
+- one survivor was redundant unreachable agent-assertion adjudication logic;
+- redundant logic removed;
+- four direct bundle-tamper tests added;
+- corrected run #50 — PASS, 18/18 targeted semantic mutants killed, 0 survived;
+- exact branch-head run #53 — PASS;
+- pull-request run #54 — PASS.
+
+**Merge method:** squash
+
+**Mutation-hardening merge commit:** `9e51e93981b96827d1e843d567f6db49dd7cc8ed`
+
+**Post-merge GitHub Actions:** run #55, run id `36226427832` — PASS.
+
+**Canonical verified test posture after hardening:**
+- repository tests: 77 passed;
+- targeted Phase 1 semantic mutations: 18;
+- killed: 18;
+- survived: 0;
+- mutation specification errors: 0;
+- targeted mutation score: 100% for the configured set;
+- mutation report uploaded as workflow artifact;
+- Ruff correctness gate — PASS;
+- Bandit medium/high gate — PASS;
+- fixed runner image build — PASS;
+- hardened sandbox smoke test — PASS.
+
+**Interpretation:** the 77-test count is no longer reported as a single undifferentiated proof claim. The important added evidence is that the focused Phase 1 suite detects all 18 deliberately selected critical semantic corruptions. This remains targeted evidence, not proof of total correctness.
+
+**Not established:** broad mutation coverage, property-based invariant coverage, seeded-defect benchmark performance, real-repository performance, independent external audit, hosted-service readiness, deployment, or production proof.
+
+**External repository mutations:** none.
+
+**Next canonical roadmap phase:** Phase 2 — Git / PR Intake, with Phase 1 mutation testing retained as a permanent CI regression gate.
