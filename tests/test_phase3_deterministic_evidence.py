@@ -118,6 +118,8 @@ def tool_result(payload: bytes, exit_code=0, completed=True):
         duration_ms=5,
         stdout=payload,
         stdout_sha256=hashlib.sha256(payload).hexdigest(),
+        stderr=b"",
+        stderr_sha256=hashlib.sha256(b"").hexdigest(),
         version="tool 1",
         error=None if completed else "incomplete",
     )
