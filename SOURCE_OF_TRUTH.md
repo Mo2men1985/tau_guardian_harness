@@ -20,6 +20,42 @@ It is not primarily a code-generation agent or generic PR-comment bot.
 
 The acceptance model is based on direct evidence such as executable tests, structured static-analysis findings, security evidence, exact candidate identity, requirement/invariant checks, and independently produced review evidence.
 
+## Production value doctrine
+
+The primary objective is to build a **real product that reaches production and creates real user value**.
+
+Tests, CI, mutation gates, benchmarks, audits, and other assurance mechanisms are **means of obtaining trustworthy evidence** about the product. They are not the project objective and must never be optimized merely to make a pipeline green.
+
+The project must therefore prefer evidence that answers real production questions:
+
+- Does the implementation solve a real user problem?
+- Does it behave correctly under realistic and adversarial conditions?
+- Does it fail safely?
+- Does it integrate with real repositories, workflows, permissions, dependencies, and infrastructure?
+- Does it create measurable value beyond simpler or existing alternatives?
+- Is it secure, reliable, maintainable, observable, operable, and commercially usable?
+- Can independent or external evidence reproduce the claimed behavior?
+
+A test that only mirrors the implementation, exercises a toy path, or exists mainly to satisfy CI is weak evidence and must not be treated as proof of readiness.
+
+Test counts are never a quality target. When test results are reported, distinguish their evidence class and relevance, such as:
+
+- core contract tests;
+- regression tests;
+- mutation tests;
+- integration tests;
+- adversarial/negative tests;
+- benchmark tests;
+- real-repository tests;
+- end-to-end tests;
+- production/staging evidence.
+
+The governing question for every engineering action is:
+
+> Does this move Agent Merge Gate closer to a defensible, production-capable product that provides real value?
+
+If an activity increases test counts or internal complexity without materially improving correctness, evidence, production readiness, user value, or commercial viability, it should be deprioritized or removed.
+
 ## Current canonical base
 
 - Baseline branch at project start: `main`
