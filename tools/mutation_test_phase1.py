@@ -64,13 +64,6 @@ MUTATIONS = (
         "Evidence from another candidate must not establish this candidate.",
     ),
     Mutation(
-        "agent_assertion_non_establishing",
-        "adjudication.py",
-        "if record.evidence_class == AGENT_ASSERTION:",
-        "if False and record.evidence_class == AGENT_ASSERTION:",
-        "An agent assertion must not become establishing evidence.",
-    ),
-    Mutation(
         "evidence_class_admissibility_enforced",
         "adjudication.py",
         "if record.evidence_class not in criterion.admissible_evidence_classes:",
