@@ -26,6 +26,8 @@ Its differentiator is evidence-backed acceptance: exact candidate identity, dete
 8. **Every meaningful project action is recorded in `LOGBOOK.md`.**
 9. **Every imported component is recorded in `SOURCE_OF_TRUTH.md`.**
 10. **Do not build the SaaS until the benchmark proves the core auditor adds real value.**
+11. **Tests and CI are evidence, not the objective.** Never optimize for green pipelines at the expense of realistic behavior, production readiness, or user value.
+12. **Production value is the governing target.** Each phase must move the system toward a secure, reliable, operable, commercially useful product under real conditions.
 
 ---
 
