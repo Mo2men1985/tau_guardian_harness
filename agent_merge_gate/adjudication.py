@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from .common import ABSTAIN, AGENT_ASSERTION, KNOWN_DECISIONS, PASS, VETO, MergeGateError, require_id, sha256_json
+from .common import ABSTAIN, KNOWN_DECISIONS, PASS, VETO, MergeGateError, require_id, sha256_json
 from .criteria import CriteriaLock, Criterion
 from .evidence import EvidenceRegistry
 from .submission import AuditSubmission, CriterionEvidence
@@ -84,10 +84,6 @@ def _evaluate(
             continue
         if record.candidate_sha != candidate_sha:
             reasons.append(f"EVIDENCE_STALE:{evidence_id}")
-            uncertain = True
-            continue
-        if record.evidence_class == AGENT_ASSERTION:
-            reasons.append(f"AGENT_ASSERTION_NON_ESTABLISHING:{evidence_id}")
             uncertain = True
             continue
         if record.evidence_class not in criterion.admissible_evidence_classes:

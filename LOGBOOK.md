@@ -300,3 +300,68 @@ Ruff found a misspelled independent-review producer constant on the newly scanne
 **External repository mutations:** none.
 
 **Next canonical roadmap phase:** Phase 2 — Git / PR Intake.
+
+
+---
+
+## 2026-09-26 — Phase 1 mutation hardening
+
+**Actor:** ChatGPT / Owner-authorized repository operation
+
+**Repository:** `Mo2men1985/tau_guardian_harness`
+
+**Branch:** `product/phase1-mutation-hardening`
+
+**Starting main commit:** `58673e2e6b9681a7776664257147a0aca796d2fc`
+
+**Purpose:** verify that the Phase 1 test suite detects deliberate semantic corruption of critical merge-gate invariants rather than merely passing the intended implementation.
+
+**Actions:**
+- added `tools/mutation_test_phase1.py`;
+- added a permanent targeted mutation gate to GitHub Actions;
+- added upload of a machine-readable mutation report artifact;
+- added explicit bundle-tamper regression tests;
+- removed one unreachable duplicate agent-assertion adjudication branch;
+- added `docs/PHASE1_MUTATION_TESTING.md`;
+- updated Phase 1 completion evidence in `ROADMAP.md`.
+
+**First enforced mutation run:** GitHub Actions run #47, run id `36226155921` — FAILED as intended by the gate.
+
+First-run result:
+- configured mutants: 19;
+- killed: 14;
+- survived: 5;
+- specification errors: 0.
+
+Survivors:
+- one redundant/unreachable agent-assertion adjudication defense;
+- forged bundle decision not directly tested;
+- criteria-lock hash tamper not directly tested;
+- evidence-registry hash tamper not directly tested;
+- submission hash tamper not directly tested.
+
+**Remediation:**
+- the redundant unreachable adjudication branch was removed;
+- four direct tamper tests were added.
+
+**Corrected verification:** GitHub Actions run #50, run id `36226234958` — PASS.
+
+Observed corrected result:
+- repository tests: 77 passed;
+- targeted semantic mutants: 18;
+- killed: 18;
+- survived: 0;
+- mutation specification errors: 0;
+- targeted mutation score: 100% for the configured 18-mutant set;
+- Ruff correctness gate — PASS;
+- Bandit medium/high gate — PASS;
+- fixed runner image build — PASS;
+- hardened sandbox smoke test — PASS.
+
+**Evidence artifact:** `phase1-mutation-report` uploaded by run #50.
+
+**Interpretation:** the current focused Phase 1 suite now detects all 18 deliberately selected critical semantic corruptions. This does not prove correctness and is not a substitute for broader mutation generation, property-based testing, seeded-defect benchmarking, real-repository evaluation, or independent external audit.
+
+**External repository mutations:** none.
+
+**Next:** verify the exact documentation/logbook branch head, open a hardening PR, run PR CI, and merge only if the mutation gate remains green.

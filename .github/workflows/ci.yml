@@ -21,16 +21,27 @@ jobs:
         run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
       - name: Unit and policy tests
         run: python -m pytest -q
+      - name: Targeted Phase 1 mutation gate
+        run: python tools/mutation_test_phase1.py --json-out mutation_reports/phase1.json
+      - name: Upload mutation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase1-mutation-report
+          path: mutation_reports/phase1.json
+          if-no-files-found: error
       - name: Ruff correctness gate
         run: >-
           ruff check
           agent_merge_gate
+          tools/mutation_test_phase1.py
           harness.py ast_security.py docker_sandbox.py llm_client.py
           tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py
           tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
       - name: Bandit medium/high findings
         run: |
           bandit -q -ll -r agent_merge_gate
+          bandit -q -ll tools/mutation_test_phase1.py
           bandit -q -ll             harness.py ast_security.py docker_sandbox.py llm_client.py             tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py             tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
       - name: Build fixed runner image
         run: docker build -f Dockerfile.runner -t guardian-evidence-runner:py311 .
