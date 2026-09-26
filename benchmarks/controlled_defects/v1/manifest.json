@@ -78,5 +78,14 @@
       "expected_observable_failure": "The returned reset token contains a reversible encoding of secret_key.",
       "failure_class": "secret_exposure"
     }
-  ]
+  ],
+  "design_review": {
+    "status": "REVISED_BEFORE_FIRST_CANDIDATE_EXECUTION",
+    "reviewer": "Codex automated PR review",
+    "reviewed_commit": "70113fdfb62942574d0dbd447e7d5f372c192fd0",
+    "constraints": [
+      "Primary incremental-value cases must survive ordinary CI on the exact candidate.",
+      "A VETO counts as DETECTED only when blocking evidence is causally linked to the frozen seeded defect."
+    ]
+  }
 }
