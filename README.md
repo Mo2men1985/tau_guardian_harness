@@ -1,163 +1,127 @@
-# τGuardian Code Harness (LLM Coding Safety Harness)
+# Guardian Evidence Gate
 
-> **Portfolio:** For a concise overview of my AI-native engineering work, including a sanitized Governed Multiplayer AI case study and selected evidence map, see [PORTFOLIO.md](PORTFOLIO.md).
+Guardian Evidence Gate is an experimental, evidence-driven acceptance harness for AI-generated code.
 
-This folder contains a minimal, model-agnostic harness to compare:
+It does **not** use a home-made reliability score. It does **not** treat model confidence, a custom scalar, or an arbitrary iteration formula as proof. A candidate can pass only when required evidence exists and the configured policy is satisfied.
 
-- **Baseline** LLM code generation.
-- A **wrapped** approach using tests, linter, security rules, and a τ-bounded repair loop.
+## What the project does
 
-Metrics:
+For each generated candidate, the harness can collect:
 
-- **CRI** — Coherence / Reliability Index (tests + linter + security).
-- **SAD** — Security Anomaly Detection flag (any violation ⇒ True).
-- **τ** — Symbolic Time, the iteration depth of repair.
+- executable behavioral-test evidence from pytest/JUnit XML;
+- Ruff diagnostics in JSON form;
+- Bandit findings in JSON form;
+- optional Semgrep findings;
+- optional dependency-vulnerability evidence from pip-audit;
+- advisory custom AST heuristics;
+- model-call provenance and hashes;
+- candidate/spec/test hashes;
+- an explicit PASS / ABSTAIN / VETO decision with reason codes.
 
-## Usage
+The repair loop is bounded by an ordinary `max_attempts` count. That count is operational bookkeeping only.
 
-1. Install dependencies:
+## Decision contract
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+### PASS
 
-2. Set your API key and optional model name:
+Only when all mandatory evidence is complete, tests actually ran and collected at least one test, pytest exited successfully with zero failures/errors, required scanners completed, and there are no blocking findings under the configured policy.
 
-   ```bash
-   export OPENAI_API_KEY=sk-...
-   export LLM_MODEL_NAME=gpt-5.1
-   ```
+### VETO
 
-3. Run the harness:
+Used for a demonstrated blocking failure, such as a functional regression or a confirmed blocking scanner finding.
 
-   ```bash
-   python harness.py
-   ```
+### ABSTAIN
 
-   This will run baseline + wrapped for the example tasks and write `results.jsonl`.
+Used when evidence is insufficient: a required tool is missing, a scan fails, Docker is unavailable, the test run times out, no tests are collected, provenance is incomplete, or another required check cannot be established.
 
-4. Analyze:
+## Isolation model
 
-   ```bash
-   python analyze_results.py
-   ```
-
-You can add new tasks by extending `example_tasks()` and providing:
-
-- A spec file in `tasks/`
-- Starter code in `tg_code/`
-- Tests in `tests/`
-- Security rules in the `Task` definition.
-
-
-## Security model
-
-τGuardian treats all LLM-generated code as untrusted until it passes three layers:
-
-1. **Behavioral tests (pytest)**  
-   Each task comes with a unit/regression test suite that must pass.
-
-2. **Static analysis (linter + security rules)**  
-   - `ruff` linter errors are counted as CRI penalties.  
-   - Regex-based checks flag obvious issues like raw SQL string concatenation, hardcoded secrets, and dangerous HTML sinks.  
-   - `ast_security.py` performs **AST-based inspection** of the Python syntax tree to detect:
-     - Dynamic SQL query construction (string concat, f-strings, `.format`)
-     - Missing authentication checks on web endpoints
-     - Multiple write operations without a transaction wrapper
-     - Hardcoded credentials in assignments
-     - Potential XSS sinks (e.g. `dangerouslySetInnerHTML`)
-
-3. **Decision policy (CRI + SAD + τ)**  
-   - **OK**: High CRI, tests all pass, no security violations.  
-   - **ABSTAIN**: Remaining issues after `τ_max` repair attempts.  
-   - **VETO**: Any security anomaly (SAD = True) triggers a hard veto irrespective of CRI.
-
-For adversarial or untrusted tasks, you can also enable an optional **Docker sandbox** to run tests in an isolated container (no network, ephemeral filesystem):
+Generated code is treated as untrusted. Sandbox execution is the default path. Host execution requires the explicit development override:
 
 ```bash
-export TG_SANDBOX=1
-python harness.py
+export GUARDIAN_UNSAFE_LOCAL_EXECUTION=1
 ```
 
-## CRI / τ plots
-
-Once you have run `harness.py` a few times and collected multiple wrapped runs in `results.jsonl`, you can visualize how code reliability evolves over symbolic time (τ):
+For Docker execution, build the fixed runner image in advance:
 
 ```bash
-python visualize_results.py results.jsonl
-# -> writes cri_history.png in the project root
+docker build -f Dockerfile.runner -t guardian-evidence-runner:py311 .
 ```
 
-The plot shows one line per (task, model) pair, with CRI at each iteration step until the harness either converges or hits `τ_max`. This image can be dropped directly into a blog post or paper.
+The runtime container is launched without network access, with a read-only root filesystem, dropped capabilities, no-new-privileges, resource limits, a non-root user, and a temporary writable evidence mount.
 
-## τGuardian-10 benchmark
+Ordinary Docker is a useful containment layer, not a claim of complete isolation against fully hostile multi-tenant workloads.
 
-The **τGuardian-10** benchmark is a small but security-focused suite of coding tasks that stress-test LLM codegen on realistic, safety-critical scenarios.
-
-Each task is defined by:
-
-- A **natural-language spec** in `tasks/`
-- **Starter code** in `tg_code/` (often deliberately incomplete or unsafe)
-- A **reference solution** in `tg_code/` (for baselines and sanity)
-- A **pytest file** in `tests/`
-- A list of **security rules** mapped to CRI penalties and SAD vetoes
-
-### Tasks overview
-
-| # | Task name                | Domain                    | Primary rules                             |
-|---|--------------------------|---------------------------|-------------------------------------------|
-| 1 | `rate_limiter_python`    | Infra / abuse prevention  | –                                         |
-| 2 | `funds_transfer_secure`  | Banking / auth / ledger   | `MISSING_AUTH`, `NO_TRANSACTION`, `SECRETS` |
-| 3 | `sql_search_users`       | SQL query endpoint        | `SQLI`                                    |
-| 4 | `web_login_handler`      | Web login route           | `MISSING_AUTH`, `SECRETS`                 |
-| 5 | `password_reset_token`   | Account recovery          | `SECRETS`                                 |
-| 6 | `file_upload_validator`  | File / content handling   | `SECRETS`                                 |
-| 7 | `html_template_renderer` | HTML rendering / templating | `XSS`                                  |
-| 8 | `audit_log_writer`       | Audit logging / compliance| `NO_TRANSACTION`                          |
-| 9 | `jwt_auth_middleware`    | API auth / middleware     | `MISSING_AUTH`, `SECRETS`                 |
-|10 | `api_rate_plan_billing`  | Billing / metering logic  | –                                         |
-
-The harness already includes a placeholder `Task(...)` entry for each of these in `example_tasks()`. To activate a given task, create:
-
-- `tasks/<task>_spec.txt`
-- `tg_code/<task>_starter.py`
-- `tg_code/<task>_solution.py`
-- `tests/test_<task>.py`
-
-and then run:
+## Install
 
 ```bash
-python harness.py
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\\Scripts\\activate
+pip install -r requirements.txt
 ```
 
-τGuardian will log both **baseline** and **τ-bounded wrapped** runs to `results.jsonl`, including CRI, SAD, and per-task τ statistics.
+Optional Semgrep support:
 
-## SWE-bench with mini-SWE-agent + Gemini 2.5 Pro (Option 1)
+```bash
+pip install -r requirements-security.txt
+```
 
-τGuardian's native SWE harness (`run_swebench_experiment.py` / `swe_runner.py`) is model-agnostic and works
-with any LLM configured via `llm_client.py`. For Gemini 2.5 Pro / Gemini 3 Pro benchmarks on SWE-bench,
-a practical path is to re-use the official **mini-SWE-agent** pipeline and treat τGuardian as an extra
-metrics layer around its results.
+## Run the internal regression task suite
 
-See `docs/POSTAPPLY_SECURITY_SCAN.md` for the authoritative post-apply security
-scan workflow that stabilizes SAD decisions on SWE-bench outputs.
+Local model through Ollama:
 
-This repository does **not** vendor mini-SWE-agent. To reproduce the Gemini 2.5 Pro numbers from the
-SWE-bench leaderboard:
+```bash
+export LLM_PROVIDER=ollama
+export LLM_MODEL_NAME=qwen3:8b
+python auto_runs.py internal --model qwen3:8b --provider ollama --max-attempts 3
+```
 
-1. Install `mini-swe-agent` and its dependencies in a separate environment, following the official docs:
-   - https://github.com/SWE-agent/mini-swe-agent
-   - https://mini-swe-agent.com/latest/
+Cloud providers are supported through environment variables and the provider SDKs.
 
-2. Configure Gemini via LiteLLM or the provider config used by mini-SWE-agent, and run their official
-   SWE-bench command for `gemini-2.5-pro` or `gemini-2.5-flash`.
+The 11 included tasks are an **internal regression task suite**, not a validated public benchmark.
 
-3. Export the predictions JSONL / results produced by mini-SWE-agent.
+## SWE-bench
 
-4. Optionally, you can then point τGuardian at those patched repos (or the predictions file) and run:
-   - `python analyze_results.py` to compute CRI / SAD / τ-style metrics or compare against τGuardian's
-     own SWE harness.
+This repository no longer maintains a second custom benchmark runner. Run the official SWE-bench / mini-SWE-agent path, preserve its native outcome artifact, then join that artifact with separate security evidence:
 
-This keeps τGuardian's runtime simple and provider-agnostic, while allowing you to rely on the
-battle-tested mini-SWE-agent stack for the exact Gemini SWE-bench configuration used on the public
-leaderboard.
+```bash
+python analyze_mini_swe_results.py \
+  --predictions preds.json \
+  --instance-results instance_results.jsonl \
+  --security-reports-dir security_reports \
+  --model-id your-model \
+  --output evaluation.jsonl
+```
+
+See `docs/SWE_BENCH.md`.
+
+## Evidence schema
+
+Active result records use `schema_version: "2.0"` and expose direct facts rather than a synthetic score. See `docs/EVIDENCE_SCHEMA.md`.
+
+## Custom heuristics
+
+`ast_security.py` contains small custom heuristic checks. They are advisory unless and until each rule is measured against labeled positive and negative fixtures. They must not be described as proving that code is secure.
+
+Primary blocking evidence should come from executable tests and established tooling configured by policy.
+
+## Historical results
+
+Pre-rewrite generated result files and build dumps were removed from the active repository because they were produced under an invalid evidence model. They should not be cited as current performance proof.
+
+## CI
+
+The repository includes GitHub Actions checks for:
+
+- unit/policy tests;
+- patch-normalization regression tests;
+- retired-concept guard;
+- Ruff;
+- Bandit;
+- runner-image build and sandbox smoke test where Docker is available.
+
+A release claim should point to an actual successful workflow run bound to an exact commit SHA.
+
+## Current boundary
+
+This is an engineering prototype for AI-code acceptance and evidence collection. It is not presented as a validated scientific metric, a proof of software security, or a production-certified commercial service.

@@ -1,41 +1,56 @@
+#!/usr/bin/env python3
+from __future__ import annotations
 
-# Simple analysis script for results.jsonl
 import json
+import statistics
 from collections import defaultdict
+from pathlib import Path
+from typing import Any, Dict, List
 
 
-def load_results(path: str = "results.jsonl"):
-    records = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                records.append(json.loads(line))
-    return records
+def load_results(path: str) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for line in Path(path).read_text(encoding="utf-8").splitlines():
+        if line.strip(): rows.append(json.loads(line))
+    return rows
 
 
-def main():
-    recs = load_results()
-    by_model_task = defaultdict(list)
-    for r in recs:
-        key = (r["model"], r["task"])
-        by_model_task[key].append(r)
-
-    for (model, task), items in by_model_task.items():
-        baseline = next((x for x in items if x["type"] == "baseline"), None)
-        wrapped = next((x for x in items if x["type"] == "wrapped"), None)
-        print(f"=== {model} / {task} ===")
-        if baseline:
-            print(f"  Baseline pass rate: {baseline.get('test_pass_rate')}")
-            print(f"  Baseline sec violations: {baseline.get('security_violation_count')}")
-        if wrapped:
-            print(f"  Wrapped final decision: {wrapped.get('final_decision')}")
-            print(f"  Wrapped last pass rate: {wrapped.get('last_test_pass_rate')}")
-            print(f"  Wrapped cri history: {wrapped.get('cri_history')}")
-            print(f"  Wrapped last security violations: {wrapped.get('last_security_violations')}")
-        print()
+def _state(rec: Dict[str, Any]) -> str:
+    decision = rec.get("decision") or rec.get("final_decision") or {}
+    return str(decision.get("state", "UNKNOWN")) if isinstance(decision, dict) else str(decision)
 
 
-if __name__ == "__main__":
-    main()
+def summarize(path: str) -> Dict[str, Any]:
+    rows = load_results(path)
+    baseline = [r for r in rows if r.get("type") == "baseline"]
+    repaired = [r for r in rows if r.get("type") == "repair_loop"]
+    initial_pass = sum(1 for r in baseline if _state(r) == "PASS")
+    final_pass = sum(1 for r in repaired if _state(r) == "PASS")
+    initial_failed = [r for r in baseline if _state(r) != "PASS"]
+    repaired_map = {r.get("task"): r for r in repaired}
+    recovered = sum(1 for r in initial_failed if _state(repaired_map.get(r.get("task"), {})) == "PASS")
+    attempts = [int(r.get("attempt_count", 0)) for r in repaired if r.get("attempt_count") is not None]
+    return {
+        "records": len(rows),
+        "tasks": len({r.get("task") for r in rows}),
+        "initial_pass": initial_pass,
+        "final_pass": final_pass,
+        "repair_success_given_initial_nonpass": {
+            "recovered": recovered,
+            "eligible": len(initial_failed),
+        },
+        "median_attempts": statistics.median(attempts) if attempts else None,
+        "abstain": sum(1 for r in repaired if _state(r) == "ABSTAIN"),
+        "veto": sum(1 for r in repaired if _state(r) == "VETO"),
+    }
 
 
+def main() -> None:
+    import argparse
+    parser = argparse.ArgumentParser(description="Summarize direct evidence outcomes")
+    parser.add_argument("results", nargs="?", default="results-v2.jsonl")
+    args = parser.parse_args()
+    print(json.dumps(summarize(args.results), indent=2))
+
+
+if __name__ == "__main__": main()

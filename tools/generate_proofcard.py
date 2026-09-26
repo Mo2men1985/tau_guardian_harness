@@ -1,169 +1,63 @@
 #!/usr/bin/env python3
-"""tools/generate_proofcard.py
-
-Generate a τGuardian ProofCard JSON from an enriched JSONL file.
-"""
 from __future__ import annotations
 
 import argparse
 import hashlib
-import hmac
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-def _canonical_json_bytes(obj: Any) -> bytes:
-    return json.dumps(
-        obj,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")
 
-def _load_record(enriched_path: Path, instance_id: Optional[str]) -> Dict[str, Any]:
-    if not enriched_path.exists():
-        raise FileNotFoundError(f"enriched-path not found: {enriched_path}")
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
 
-    with enriched_path.open("r", encoding="utf-8") as fh:
-        for ln in fh:
-            ln = ln.strip()
-            if not ln:
-                continue
-            rec = json.loads(ln)
-            if instance_id is None:
-                return rec
-            if rec.get("instance_id") == instance_id:
-                return rec
 
-    if instance_id is None:
-        raise ValueError(f"No JSON records found in enriched-path: {enriched_path}")
-    raise ValueError(
-        f"No record found for instance_id={instance_id!r} in {enriched_path}"
-    )
+def _load_record(path: Path, instance_id: Optional[str]) -> Dict[str, Any]:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip(): continue
+        rec = json.loads(line)
+        key = rec.get("instance_id") or rec.get("task")
+        if instance_id is None or key == instance_id: return rec
+    raise ValueError("matching evidence record not found")
 
-def _compute_patch_hash(record: Dict[str, Any]) -> Optional[str]:
-    patch = record.get("patch")
-    if not patch:
-        return None
-    if not isinstance(patch, str):
-        patch = str(patch)
-    return hashlib.sha256(patch.encode("utf-8")).hexdigest()
 
-def _compute_hmac_signature(payload_bytes: bytes, key_path: Path) -> str:
-    key = key_path.read_bytes()
-    sig = hmac.new(key, payload_bytes, hashlib.sha256).hexdigest()
-    return sig
+def generate_proofcard(evidence_path: Path, out_dir: Path, instance_id: Optional[str] = None) -> Path:
+    rec = _load_record(evidence_path, instance_id)
+    decision = rec.get("decision") or rec.get("final_decision") or {}
+    candidate = rec.get("candidate_identity") or {}
+    tests = rec.get("tests") or {}
+    tools = rec.get("tools") or {}
 
-def generate_proofcard(
-    enriched_path: Path,
-    out_dir: Path,
-    instance_id: Optional[str] = None,
-    sign_key_path: Optional[Path] = None,
-) -> Path:
-    import uuid
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    rec = _load_record(enriched_path, instance_id=instance_id)
-
-    run_id = rec.get("run_id", "unknown_run")
-    resolved_instance_id = rec.get("instance_id") or rec.get("task") or "unknown_instance"
-    model = rec.get("model", "unknown_model")
-
-    tests_passed = rec.get("tests_passed", 0)
-    tests_failed = rec.get("tests_failed", 0)
-    total_tests = rec.get("total_tests", tests_passed + tests_failed)
-
-    cri = rec.get("cri", None)
-    sad_flag = rec.get("sad_flag", rec.get("sad", None))
-    tau = rec.get("tau", rec.get("last_tau", None))
-    decision = rec.get("final_decision", rec.get("decision", "UNKNOWN"))
-
-    patch_hash = _compute_patch_hash(rec)
-
-    proofcard_id = str(uuid.uuid4())
-    now_utc = datetime.now(timezone.utc).isoformat()
-
-    payload: Dict[str, Any] = {
-        "proofcard_id": proofcard_id,
-        "run_id": run_id,
-        "instance_id": resolved_instance_id,
-        "model": model,
-        "timestamp": now_utc,
-        "tests": {
-            "passed": tests_passed,
-            "failed": tests_failed,
-            "total": total_tests,
-        },
-        "cri": cri,
-        "sad_flag": sad_flag,
-        "tau": tau,
+    payload = {
+        "schema_version": "2.0",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "instance_id": rec.get("instance_id") or rec.get("task"),
+        "model": rec.get("model"),
+        "repo_commit_sha": candidate.get("repo_commit_sha"),
+        "candidate_sha256": candidate.get("candidate_sha256"),
+        "policy_version": candidate.get("policy_version"),
+        "pytest_report_sha256": tests.get("report_sha256"),
+        "tool_artifact_sha256": {name: ev.get("artifact_sha256") for name, ev in tools.items() if isinstance(ev, dict)},
         "decision": decision,
-        "patch_hash": patch_hash,
-        "source_enriched_path": str(enriched_path),
+        "source_evidence_sha256": _sha256(evidence_path.read_bytes()),
     }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    payload["payload_sha256"] = _sha256(canonical)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "ProofCard.json"
+    path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+    return path
 
-    payload_bytes = _canonical_json_bytes(payload)
-    payload_hash = hashlib.sha256(payload_bytes).hexdigest()
-    payload["payload_hash"] = payload_hash
-
-    if sign_key_path is not None:
-        if not sign_key_path.exists():
-            raise FileNotFoundError(f"sign-key not found: {sign_key_path}")
-        signature = _compute_hmac_signature(payload_bytes, sign_key_path)
-        payload["signature"] = {
-            "algo": "HMAC-SHA256",
-            "key_hint": sign_key_path.name,
-            "value": signature,
-        }
-
-    out_path = out_dir / "ProofCard.json"
-    out_path.write_text(
-        json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-    print(f"[generate_proofcard] Wrote ProofCard to {out_path}")
-    return out_path
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Generate a τGuardian ProofCard from enriched JSONL."
-    )
-    parser.add_argument(
-        "--enriched-path",
-        required=True,
-        help="Path to enriched JSONL file (output of analyze_mini_swe_results.py).",
-    )
-    parser.add_argument(
-        "--out-dir",
-        required=True,
-        help="Directory to write ProofCard.json into.",
-    )
-    parser.add_argument(
-        "--instance-id",
-        default=None,
-        help="Optional instance_id to select a specific record (default: first record).",
-    )
-    parser.add_argument(
-        "--sign-key",
-        default=None,
-        help="Optional path to secret key file for HMAC-SHA256 signature.",
-    )
+    parser = argparse.ArgumentParser(description="Generate an evidence-bound ProofCard.")
+    parser.add_argument("--evidence-path", required=True)
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--instance-id", default=None)
     args = parser.parse_args()
+    path = generate_proofcard(Path(args.evidence_path), Path(args.out_dir), args.instance_id)
+    print(path)
 
-    enriched_path = Path(args.enriched_path).resolve()
-    out_dir = Path(args.out_dir).resolve()
-    instance_id = args.instance_id
-    sign_key_path = Path(args.sign_key).resolve() if args.sign_key else None
 
-    generate_proofcard(
-        enriched_path,
-        out_dir,
-        instance_id=instance_id,
-        sign_key_path=sign_key_path,
-    )
-
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
