@@ -459,7 +459,16 @@ def parse_bandit(result: ContainerCommandResult) -> list[dict[str, Any]]:
         raise MergeGateError(f"BANDIT_OUTPUT_INVALID: {exc}") from exc
     if not isinstance(payload, dict):
         raise MergeGateError("BANDIT_OUTPUT_NOT_OBJECT")
+    if "errors" not in payload:
+        raise MergeGateError("BANDIT_ERRORS_MISSING")
+    errors = payload["errors"]
+    if not isinstance(errors, list):
+        raise MergeGateError("BANDIT_ERRORS_NOT_LIST")
+    if errors:
+        raise MergeGateError("BANDIT_SCAN_ERRORS_PRESENT")
     rows = payload.get("results", [])
     if not isinstance(rows, list):
         raise MergeGateError("BANDIT_RESULTS_NOT_LIST")
-    return [item for item in rows if isinstance(item, dict)]
+    if any(not isinstance(item, dict) for item in rows):
+        raise MergeGateError("BANDIT_RESULT_ENTRY_INVALID")
+    return rows
