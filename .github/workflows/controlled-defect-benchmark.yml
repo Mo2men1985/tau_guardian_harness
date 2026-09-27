@@ -71,9 +71,6 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           GATE_OUTPUT: ${{ runner.temp }}/benchmark_gate_reports
         run: |
           rm -rf "$GATE_OUTPUT"
