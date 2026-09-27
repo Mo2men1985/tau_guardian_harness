@@ -8,12 +8,10 @@ translated into Phase-1 EvidenceRecords before adjudication.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import os
 from pathlib import Path, PurePosixPath
 import subprocess
-import tarfile
 import tempfile
 from typing import Any
 
@@ -59,10 +57,11 @@ def _write_json(path: Path, value: Any) -> str:
     return _write_bytes(path, payload)
 
 
-def _git_archive(repo_path: Path, candidate_sha: str) -> bytes:
+def _git_object(repo_path: Path, object_id: str) -> bytes:
+    """Read one Git object without applying working-tree/archive attributes."""
     try:
         proc = subprocess.run(
-            ["git", "archive", "--format=tar", candidate_sha],
+            ["git", "cat-file", "blob", object_id],
             cwd=repo_path,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -72,33 +71,13 @@ def _git_archive(repo_path: Path, candidate_sha: str) -> bytes:
     except FileNotFoundError as exc:
         raise MergeGateError("GIT_NOT_AVAILABLE") from exc
     except subprocess.TimeoutExpired as exc:
-        raise MergeGateError("GIT_ARCHIVE_TIMEOUT") from exc
+        raise MergeGateError("GIT_OBJECT_TIMEOUT") from exc
     if proc.returncode != 0:
         raise MergeGateError(
-            "GIT_ARCHIVE_FAILED: " + proc.stderr.decode("utf-8", "replace").strip()
+            "GIT_OBJECT_READ_FAILED: "
+            + proc.stderr.decode("utf-8", "replace").strip()
         )
     return proc.stdout
-
-
-def _safe_extract_archive(archive: bytes, destination: Path) -> None:
-    """Extract a Git archive without accepting links or special files."""
-    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
-        for member in tar.getmembers():
-            path = PurePosixPath(member.name)
-            if path.is_absolute() or ".." in path.parts:
-                raise MergeGateError(f"ARCHIVE_PATH_UNSAFE: {member.name}")
-            target = destination.joinpath(*path.parts)
-            if member.isdir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            if not member.isfile():
-                raise MergeGateError(f"ARCHIVE_MEMBER_UNSUPPORTED: {member.name}")
-            target.parent.mkdir(parents=True, exist_ok=True)
-            source = tar.extractfile(member)
-            if source is None:
-                raise MergeGateError(f"ARCHIVE_FILE_UNREADABLE: {member.name}")
-            target.write_bytes(source.read())
-            target.chmod(0o755 if member.mode & 0o111 else 0o644)
 
 
 def materialize_candidate(
@@ -106,10 +85,67 @@ def materialize_candidate(
     candidate_sha: str,
     destination: Path,
 ) -> str:
-    archive = _git_archive(Path(repo_path).resolve(), candidate_sha)
-    _safe_extract_archive(archive, destination)
-    return _sha256(archive)
+    """Materialize the exact committed Git tree, independent of .gitattributes.
 
+    Only regular executable/non-executable blobs are admitted. Symlinks,
+    submodules, and other tree entry types fail closed rather than producing a
+    filesystem that differs semantically from the candidate tree.
+    """
+    repo = Path(repo_path).resolve()
+    try:
+        proc = subprocess.run(
+            ["git", "ls-tree", "-r", "-z", candidate_sha],
+            cwd=repo,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=60,
+        )
+    except FileNotFoundError as exc:
+        raise MergeGateError("GIT_NOT_AVAILABLE") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise MergeGateError("GIT_TREE_TIMEOUT") from exc
+    if proc.returncode != 0:
+        raise MergeGateError(
+            "GIT_TREE_READ_FAILED: "
+            + proc.stderr.decode("utf-8", "replace").strip()
+        )
+
+    digest = hashlib.sha256()
+    for raw_entry in proc.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        try:
+            metadata, raw_path = raw_entry.split(b"\t", 1)
+            mode, object_type, object_id = metadata.decode("ascii").split(" ", 2)
+            path_text = raw_path.decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise MergeGateError("GIT_TREE_ENTRY_INVALID") from exc
+
+        path = PurePosixPath(path_text)
+        if path.is_absolute() or ".." in path.parts:
+            raise MergeGateError(f"GIT_TREE_PATH_UNSAFE: {path_text}")
+        if object_type != "blob" or mode not in {"100644", "100755"}:
+            raise MergeGateError(
+                f"GIT_TREE_ENTRY_UNSUPPORTED: {mode} {object_type} {path_text}"
+            )
+
+        data = _git_object(repo, object_id)
+        if _sha256(data) == "":
+            raise MergeGateError("GIT_OBJECT_HASH_FAILED")
+        target = destination.joinpath(*path.parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+        target.chmod(0o755 if mode == "100755" else 0o644)
+
+        digest.update(mode.encode("ascii"))
+        digest.update(b"\0")
+        digest.update(raw_path)
+        digest.update(b"\0")
+        digest.update(object_id.encode("ascii"))
+        digest.update(b"\0")
+
+    return digest.hexdigest()
 
 def _is_test_path(path: str) -> bool:
     p = PurePosixPath(path)
@@ -305,7 +341,7 @@ def _sorted_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def build_semantic_evidence(
     *,
     intake: GitIntake,
-    archive_sha256: str,
+    candidate_tree_sha256: str,
     runner_spec_sha256: str | None,
     image: str,
     pytest_result: PytestContainerResult,
@@ -324,7 +360,7 @@ def build_semantic_evidence(
         "candidate_sha": intake.audit_target.candidate_sha,
         "diff_sha256": intake.audit_target.diff_sha256,
         "intake_sha256": intake.digest,
-        "candidate_archive_sha256": archive_sha256,
+        "candidate_candidate_tree_sha256": candidate_tree_sha256,
         "runner_image": image,
         "runner_spec_sha256": runner_spec_sha256,
         "pytest": {
@@ -390,7 +426,7 @@ def collect_deterministic_evidence(
     with tempfile.TemporaryDirectory(prefix="amg-candidate-") as temp:
         snapshot = Path(temp) / "candidate"
         snapshot.mkdir()
-        archive_sha256 = materialize_candidate(
+        candidate_tree_sha256 = materialize_candidate(
             repo,
             intake.audit_target.candidate_sha,
             snapshot,
@@ -451,7 +487,7 @@ def collect_deterministic_evidence(
 
     semantic = build_semantic_evidence(
         intake=intake,
-        archive_sha256=archive_sha256,
+        candidate_tree_sha256=candidate_tree_sha256,
         runner_spec_sha256=runner_spec_sha256,
         image=image,
         pytest_result=pytest_result,
@@ -470,7 +506,7 @@ def collect_deterministic_evidence(
         "base_sha": intake.audit_target.base_sha,
         "diff_sha256": intake.audit_target.diff_sha256,
         "intake_sha256": intake.digest,
-        "candidate_archive_sha256": archive_sha256,
+        "candidate_candidate_tree_sha256": candidate_tree_sha256,
         "runner_image": image,
         "runner_image_id": runner_id,
         "runner_spec_sha256": runner_spec_sha256,
