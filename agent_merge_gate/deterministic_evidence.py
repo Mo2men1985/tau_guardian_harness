@@ -360,7 +360,7 @@ def build_semantic_evidence(
         "candidate_sha": intake.audit_target.candidate_sha,
         "diff_sha256": intake.audit_target.diff_sha256,
         "intake_sha256": intake.digest,
-        "candidate_candidate_tree_sha256": candidate_tree_sha256,
+        "candidate_tree_sha256": candidate_tree_sha256,
         "runner_image": image,
         "runner_spec_sha256": runner_spec_sha256,
         "pytest": {
@@ -506,7 +506,7 @@ def collect_deterministic_evidence(
         "base_sha": intake.audit_target.base_sha,
         "diff_sha256": intake.audit_target.diff_sha256,
         "intake_sha256": intake.digest,
-        "candidate_candidate_tree_sha256": candidate_tree_sha256,
+        "candidate_tree_sha256": candidate_tree_sha256,
         "runner_image": image,
         "runner_image_id": runner_id,
         "runner_spec_sha256": runner_spec_sha256,
