@@ -65,9 +65,6 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PHASE3_OUTPUT: ${{ runner.temp }}/phase3_reports
         run: |
           rm -rf "$PHASE3_OUTPUT"
