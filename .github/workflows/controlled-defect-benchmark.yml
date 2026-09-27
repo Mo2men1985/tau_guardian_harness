@@ -14,6 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -48,6 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
@@ -69,19 +71,25 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          python -m agent_merge_gate.evidence_cli
-          --repository "$GITHUB_REPOSITORY"
-          --repo-path .
-          --base "$PR_BASE_SHA"
-          --candidate "$PR_HEAD_SHA"
-          --output-dir benchmark_gate_reports
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE_OUTPUT: ${{ runner.temp }}/benchmark_gate_reports
+        run: |
+          rm -rf "$GATE_OUTPUT"
+          mkdir -p "$GATE_OUTPUT"
+          python -m agent_merge_gate.evidence_cli \
+            --repository "$GITHUB_REPOSITORY" \
+            --repo-path . \
+            --base "$PR_BASE_SHA" \
+            --candidate "$PR_HEAD_SHA" \
+            --output-dir "$GATE_OUTPUT"
       - name: Upload Agent Merge Gate evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: benchmark-agent-merge-gate-evidence
-          path: benchmark_gate_reports
+          path: ${{ runner.temp }}/benchmark_gate_reports
           if-no-files-found: error
       - name: Preserve gate verdict as benchmark evidence
         if: always()
@@ -89,7 +97,7 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          path = Path("benchmark_gate_reports/evidence-bundle.json")
+          path = Path(r"${{ runner.temp }}/benchmark_gate_reports/evidence-bundle.json")
           if not path.exists():
               raise SystemExit("Agent Merge Gate evidence bundle is missing")
           bundle = json.loads(path.read_text(encoding="utf-8"))
