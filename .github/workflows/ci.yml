@@ -65,20 +65,23 @@ jobs:
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: >-
-          python -m agent_merge_gate.evidence_cli
-          --repository "$GITHUB_REPOSITORY"
-          --repo-path .
-          --base "$PR_BASE_SHA"
-          --candidate "$PR_HEAD_SHA"
-          --output-dir phase3_reports
+          PHASE3_OUTPUT: ${{ runner.temp }}/phase3_reports
+        run: |
+          rm -rf "$PHASE3_OUTPUT"
+          mkdir -p "$PHASE3_OUTPUT"
+          python -m agent_merge_gate.evidence_cli \
+            --repository "$GITHUB_REPOSITORY" \
+            --repo-path . \
+            --base "$PR_BASE_SHA" \
+            --candidate "$PR_HEAD_SHA" \
+            --output-dir "$PHASE3_OUTPUT"
 
       - name: Upload deterministic evidence bundle
         if: github.event_name == 'pull_request' && always()
         uses: actions/upload-artifact@v4
         with:
           name: phase3-deterministic-evidence
-          path: phase3_reports
+          path: ${{ runner.temp }}/phase3_reports
           if-no-files-found: error
 
       - name: Targeted Phase 1 mutation gate
@@ -117,9 +120,11 @@ jobs:
           import json
           from pathlib import Path
 
-          path = Path("phase3_reports/evidence-bundle.json")
+          if "${{ steps.phase3.outcome }}" != "success":
+              raise SystemExit("Phase 3 evidence collection did not succeed")
+          path = Path(r"${{ runner.temp }}/phase3_reports/evidence-bundle.json")
           if not path.exists():
-              raise SystemExit("Phase 3 evidence bundle is missing")
+              raise SystemExit("Fresh Phase 3 evidence bundle is missing")
           bundle = json.loads(path.read_text(encoding="utf-8"))
           decision = bundle["decision"]["decision"]
           print(f"Agent Merge Gate deterministic verdict: {decision}")

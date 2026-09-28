@@ -1,0 +1,104 @@
+name: Controlled Defect Benchmark
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ordinary-ci:
+    if: startsWith(github.head_ref, 'benchmark/candidate/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Ordinary repository pytest
+        run: python -m pytest -q
+      - name: Ordinary Ruff gate
+        if: always()
+        run: >-
+          ruff check
+          agent_merge_gate
+          tools/mutation_test_phase1.py
+          harness.py ast_security.py docker_sandbox.py llm_client.py
+          tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py
+          tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
+      - name: Ordinary Bandit gate
+        if: always()
+        run: |
+          bandit -q -ll -r agent_merge_gate
+          bandit -q -ll tools/mutation_test_phase1.py
+          bandit -q -ll \
+            harness.py ast_security.py docker_sandbox.py llm_client.py \
+            tg_swebench_cli.py analyze_mini_swe_results.py tg_candidate_select.py \
+            tg_post_apply_security_scan.py auto_runs.py tools/generate_proofcard.py
+
+  agent-merge-gate:
+    if: startsWith(github.head_ref, 'benchmark/candidate/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Build fixed runner image
+        run: docker build -f Dockerfile.runner -t guardian-evidence-runner:py311 .
+      - name: Sandbox image smoke test
+        run: >-
+          docker run --rm --network none --read-only --cap-drop ALL
+          --security-opt no-new-privileges --pids-limit 64 --memory 256m --cpus 0.5
+          --user 10001:10001 --tmpfs /tmp:rw,noexec,nosuid,size=32m
+          guardian-evidence-runner:py311 python -c "print('sandbox-ok')"
+      - name: Run Agent Merge Gate independently
+        id: gate
+        continue-on-error: true
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GATE_OUTPUT: ${{ runner.temp }}/benchmark_gate_reports
+        run: |
+          rm -rf "$GATE_OUTPUT"
+          mkdir -p "$GATE_OUTPUT"
+          python -m agent_merge_gate.evidence_cli \
+            --repository "$GITHUB_REPOSITORY" \
+            --repo-path . \
+            --base "$PR_BASE_SHA" \
+            --candidate "$PR_HEAD_SHA" \
+            --output-dir "$GATE_OUTPUT"
+      - name: Upload Agent Merge Gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-agent-merge-gate-evidence
+          path: ${{ runner.temp }}/benchmark_gate_reports
+          if-no-files-found: error
+      - name: Preserve gate verdict as benchmark evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path(r"${{ runner.temp }}/benchmark_gate_reports/evidence-bundle.json")
+          if not path.exists():
+              raise SystemExit("Agent Merge Gate evidence bundle is missing")
+          bundle = json.loads(path.read_text(encoding="utf-8"))
+          print("Agent Merge Gate benchmark verdict:", bundle["decision"]["decision"])
+          # Do not fail this benchmark job merely because the product emits
+          # VETO/ABSTAIN. The verdict is an observed experimental outcome.
+          PY

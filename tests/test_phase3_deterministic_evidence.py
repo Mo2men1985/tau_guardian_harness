@@ -60,6 +60,31 @@ def test_materialize_candidate_uses_exact_git_tree(tmp_path: Path):
     assert (second / "value.txt").read_text(encoding="utf-8") == "one\n"
 
 
+def test_materialize_candidate_ignores_export_attributes(tmp_path: Path):
+    repo = tmp_path / "repo-attrs"
+    repo.mkdir()
+    git(repo, "init", "-b", "main")
+    git(repo, "config", "user.email", "tests@example.com")
+    git(repo, "config", "user.name", "Phase3")
+    (repo / ".gitattributes").write_text(
+        "tests/hidden.py export-ignore\nvalue.txt export-subst\n",
+        encoding="utf-8",
+    )
+    (repo / "value.txt").write_text("$Format:%H$\n", encoding="utf-8")
+    (repo / "tests").mkdir()
+    (repo / "tests" / "hidden.py").write_text("assert True\n", encoding="utf-8")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "attributes")
+    candidate = git(repo, "rev-parse", "HEAD")
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    materialize_candidate(repo, candidate, snapshot)
+
+    assert (snapshot / "tests" / "hidden.py").read_text(encoding="utf-8") == "assert True\n"
+    assert (snapshot / "value.txt").read_text(encoding="utf-8") == "$Format:%H$\n"
+
+
 def make_intake() -> GitIntake:
     target = AuditTarget("owner/repo", "a" * 40, CANDIDATE, "d" * 64)
     return GitIntake(
@@ -159,6 +184,7 @@ def test_ruff_findings_are_adverse_when_structured_output_is_complete():
 
 def test_bandit_only_blocks_medium_high_with_medium_high_confidence():
     payload = b"""{
+      "errors": [],
       "results": [
         {"issue_severity": "LOW", "issue_confidence": "HIGH"},
         {"issue_severity": "HIGH", "issue_confidence": "HIGH"}
@@ -174,11 +200,34 @@ def test_bandit_only_blocks_medium_high_with_medium_high_confidence():
     assert record.establishes is False
 
 
+def test_bandit_scan_errors_make_evidence_incomplete():
+    payload = b'{"errors":[{"filename":"broken.py","reason":"parse failed"}],"results":[]}'
+    record, findings, blocking = _bandit_record(
+        tool_result(payload),
+        CANDIDATE,
+        "sha256:runner",
+    )
+    assert findings == []
+    assert blocking == []
+    assert record.complete is False
+    assert record.establishes is None
+
+
+def test_bandit_missing_errors_field_is_incomplete():
+    record, _, _ = _bandit_record(
+        tool_result(b'{"results":[]}'),
+        CANDIDATE,
+        "sha256:runner",
+    )
+    assert record.complete is False
+    assert record.establishes is None
+
+
 def test_complete_clean_records_build_pass_bundle():
     pytest_record = _pytest_record(pytest_result(), CANDIDATE, "sha256:runner")
     ruff_record, _ = _ruff_record(tool_result(b"[]"), CANDIDATE, "sha256:runner")
     bandit_record, _, _ = _bandit_record(
-        tool_result(b'{"results":[]}'),
+        tool_result(b'{"errors":[],"results":[]}'),
         CANDIDATE,
         "sha256:runner",
     )
@@ -288,8 +337,8 @@ def test_semantic_fingerprint_ignores_run_local_noise():
         completed=True,
         timed_out=False,
         duration_ms=1,
-        stdout=b'{"results":[]}',
-        stdout_sha256=hashlib.sha256(b'{"results":[]}').hexdigest(),
+        stdout=b'{"errors":[],"results":[]}',
+        stdout_sha256=hashlib.sha256(b'{"errors":[],"results":[]}').hexdigest(),
         stderr=b"",
         stderr_sha256=hashlib.sha256(b"").hexdigest(),
         version="bandit 1.8.6",
@@ -301,8 +350,8 @@ def test_semantic_fingerprint_ignores_run_local_noise():
         completed=True,
         timed_out=False,
         duration_ms=800,
-        stdout=b'{"results":[]}',
-        stdout_sha256=hashlib.sha256(b'{"results":[]}').hexdigest(),
+        stdout=b'{"errors":[],"results":[]}',
+        stdout_sha256=hashlib.sha256(b'{"errors":[],"results":[]}').hexdigest(),
         stderr=b"different warning timestamp",
         stderr_sha256=hashlib.sha256(b"different warning timestamp").hexdigest(),
         version="bandit 1.8.6",
@@ -326,7 +375,7 @@ def test_semantic_fingerprint_ignores_run_local_noise():
 
     first = build_semantic_evidence(
         intake=make_intake(),
-        archive_sha256="1" * 64,
+        candidate_tree_sha256="1" * 64,
         runner_spec_sha256="2" * 64,
         image="runner",
         pytest_result=pytest_one,
@@ -339,7 +388,7 @@ def test_semantic_fingerprint_ignores_run_local_noise():
     )
     second = build_semantic_evidence(
         intake=make_intake(),
-        archive_sha256="1" * 64,
+        candidate_tree_sha256="1" * 64,
         runner_spec_sha256="2" * 64,
         image="runner",
         pytest_result=pytest_two,
@@ -357,7 +406,7 @@ def test_semantic_fingerprint_ignores_run_local_noise():
 def test_semantic_payload_contains_runner_spec_once():
     pytest_clean = pytest_result()
     ruff_clean = tool_result(b"[]")
-    bandit_clean = tool_result(b'{"results":[]}')
+    bandit_clean = tool_result(b'{"errors":[],"results":[]}')
     registry = EvidenceRegistry(
         (
             _pytest_record(pytest_clean, CANDIDATE, "sha256:runner"),
@@ -374,7 +423,7 @@ def test_semantic_payload_contains_runner_spec_once():
     )
     semantic = build_semantic_evidence(
         intake=make_intake(),
-        archive_sha256="1" * 64,
+        candidate_tree_sha256="1" * 64,
         runner_spec_sha256="2" * 64,
         image="runner",
         pytest_result=pytest_clean,
